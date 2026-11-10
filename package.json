@@ -1,0 +1,17 @@
+{
+  "name": "agent-town",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Isometric town command center for AI assistant bots",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.2",
+    "vite": "^6.2.2"
+  }
+}
