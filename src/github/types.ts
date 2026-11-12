@@ -43,7 +43,7 @@ export interface TownDataSource {
 }
 
 /** Paths that must never be fetched or displayed (privacy hard rule). */
-export const BLOCKED_WIKI_PREFIXES = ['immigration/', 'finance/', 'health/'] as const;
+export const BLOCKED_WIKI_PREFIXES = ['immigration/', 'finance/', 'health/', 'relationships/'] as const;
 
 export function isBlockedWikiPath(path: string): boolean {
   const normalized = path.replace(/^\/+/, '').toLowerCase();

@@ -102,7 +102,7 @@ export class LiveGitHubDataSource implements TownDataSource {
         wikiExcerpt = {
           title: 'Blocked path',
           markdown:
-            'This section path is blocked by the privacy model (immigration/, finance/, or health/).',
+            'This section path is blocked by the privacy model.',
         };
       } else {
         try {
