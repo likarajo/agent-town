@@ -3,11 +3,10 @@
 export async function registerPwa(): Promise<void> {
   if (!('serviceWorker' in navigator)) return;
 
-  const swUrl = new URL('sw.js', import.meta.env.BASE_URL).pathname;
-
   try {
-    const reg = await navigator.serviceWorker.register(swUrl, {
-      scope: new URL('.', import.meta.env.BASE_URL).pathname,
+    const base = new URL(import.meta.env.BASE_URL, window.location.href);
+    const reg = await navigator.serviceWorker.register(new URL('sw.js', base).pathname, {
+      scope: base.pathname,
     });
 
     const cacheBuildAssets = () => {
