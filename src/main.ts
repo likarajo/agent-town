@@ -24,6 +24,7 @@ const renderer = new TownRenderer(canvas, town);
 let camera: CameraState = createCamera(1, 1);
 let raf = 0;
 let didCenterCamera = false;
+let selectionId = 0;
 
 function updateBadge(): void {
   const mode = getDataMode();
@@ -75,17 +76,22 @@ attachTownInput({
   renderer,
   onCameraChange: scheduleDraw,
   onSelect: async (building) => {
+    const selection = ++selectionId;
     if (!building) {
       closeSheet(sheet);
       return;
     }
     hint.style.opacity = '0';
     const activity = await loadActivity(building.id);
+    if (selection !== selectionId) return;
     openSheet(sheet, sheetBody, building, activity);
   },
 });
 
-sheetClose.addEventListener('click', () => closeSheet(sheet));
+sheetClose.addEventListener('click', () => {
+  selectionId++;
+  closeSheet(sheet);
+});
 
 wireSettings({
   dialog: settingsDialog,

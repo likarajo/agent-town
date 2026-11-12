@@ -112,7 +112,8 @@ export class LiveGitHubDataSource implements TownDataSource {
             token,
           );
           if (file.encoding === 'base64' && file.content) {
-            const markdown = atob(file.content.replace(/\n/g, ''));
+            const bytes = Uint8Array.from(atob(file.content.replace(/\n/g, '')), (ch) => ch.charCodeAt(0));
+            const markdown = new TextDecoder().decode(bytes);
             wikiExcerpt = { title: path, markdown };
           }
         } catch {
