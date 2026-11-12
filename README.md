@@ -54,7 +54,7 @@ On a laptop, use the browser’s install / “Add to Dock” affordance when the
 | Network | Token is sent **only** to `https://api.github.com` |
 | Forget | Settings → **Forget token** |
 | Service worker | Caches the offline **shell** only — **never** GitHub API responses |
-| Blocked wiki paths | Never fetch or display `immigration/`, `finance/`, or `health/` |
+| Blocked wiki paths | Never fetch or display `immigration/`, `finance/`, `health/`, or `relationships/` |
 | Employer content | Out of scope — none in source or samples |
 
 Owner repo / wiki mappings are editable in Settings and are **not** baked into the build. Source ships generic placeholders such as `your-user/sample-workshop`.

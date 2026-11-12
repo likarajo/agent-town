@@ -86,6 +86,20 @@ export class TownRenderer {
     return null;
   }
 
+  /** World-space box around every building, padded for the tallest flag and the widest label. */
+  buildingBounds(): { minX: number; maxX: number; minY: number; maxY: number } {
+    const { tileW, tileH } = this.town.ground;
+    const points = this.town.buildings.map((b) => tileToScreen(b.q, b.r, tileW, tileH));
+    const xs = points.map((p) => p.x);
+    const ys = points.map((p) => p.y);
+    return {
+      minX: Math.min(...xs) - 44,
+      maxX: Math.max(...xs) + 44,
+      minY: Math.min(...ys) - 80,
+      maxY: Math.max(...ys) + 76,
+    };
+  }
+
   private drawBackdrop(w: number, h: number): void {
     const { ctx } = this;
     const g = ctx.createLinearGradient(0, 0, 0, h);
@@ -125,14 +139,17 @@ export class TownRenderer {
       }
     }
 
+    const plaza = town.buildings.find((b) => b.buildingType === 'plaza');
+    if (!plaza) return;
+
     // Path ring around plaza
     ctx.strokeStyle = 'rgba(210, 190, 140, 0.35)';
     ctx.lineWidth = 10;
     ctx.beginPath();
     for (let i = 0; i <= 24; i++) {
       const t = (i / 24) * Math.PI * 2;
-      const aq = 4 + Math.cos(t) * 1.35;
-      const ar = 4 + Math.sin(t) * 1.35;
+      const aq = plaza.q + Math.cos(t) * 1.35;
+      const ar = plaza.r + Math.sin(t) * 1.35;
       const p = tileToScreen(aq, ar, tileW, tileH);
       if (i === 0) ctx.moveTo(p.x, p.y + tileH / 2);
       else ctx.lineTo(p.x, p.y + tileH / 2);
