@@ -3,8 +3,8 @@
   "title": "Agent Town",
   "privacyNote": "Public roster only. No real repo names, PR titles, commits, wiki content, or personal info.",
   "ground": {
-    "cols": 9,
-    "rows": 9,
+    "cols": 17,
+    "rows": 17,
     "tileW": 64,
     "tileH": 32
   },
@@ -15,8 +15,8 @@
       "role": "Assistant",
       "buildingType": "plaza",
       "label": "Central Plaza",
-      "q": 4,
-      "r": 4,
+      "q": 8,
+      "r": 8,
       "accent": "#c4a35a",
       "wikiSectionPlaceholder": "assistant"
     },
@@ -27,7 +27,7 @@
       "buildingType": "townhall",
       "label": "Town Hall",
       "q": 4,
-      "r": 2,
+      "r": 1,
       "accent": "#6b8cae",
       "wikiSectionPlaceholder": "operations"
     },
@@ -37,8 +37,8 @@
       "role": "Software Engineer",
       "buildingType": "workshop",
       "label": "Workshop",
-      "q": 2,
-      "r": 3,
+      "q": 1,
+      "r": 4,
       "accent": "#d17a4a",
       "wikiSectionPlaceholder": "engineering"
     },
@@ -48,8 +48,8 @@
       "role": "Brand & Publishing Lead",
       "buildingType": "printshop",
       "label": "Print Shop",
-      "q": 6,
-      "r": 3,
+      "q": 9,
+      "r": 1,
       "accent": "#c76b8a",
       "wikiSectionPlaceholder": "publishing"
     },
@@ -60,7 +60,7 @@
       "buildingType": "lab",
       "label": "Lab",
       "q": 1,
-      "r": 5,
+      "r": 9,
       "accent": "#5aa8a0",
       "wikiSectionPlaceholder": "research"
     },
@@ -70,8 +70,8 @@
       "role": "Real Estate Advisor",
       "buildingType": "realty",
       "label": "Realty Office",
-      "q": 7,
-      "r": 5,
+      "q": 14,
+      "r": 6,
       "accent": "#8a9a5b",
       "wikiSectionPlaceholder": "realty"
     },
@@ -81,8 +81,8 @@
       "role": "Preparedness Planner",
       "buildingType": "depot",
       "label": "Supply Depot",
-      "q": 3,
-      "r": 6,
+      "q": 10,
+      "r": 14,
       "accent": "#b08d57",
       "wikiSectionPlaceholder": "preparedness"
     },
@@ -92,8 +92,8 @@
       "role": "Financial Advisor",
       "buildingType": "bank",
       "label": "Bank",
-      "q": 5,
-      "r": 6,
+      "q": 13,
+      "r": 13,
       "accent": "#7a6bb0",
       "wikiSectionPlaceholder": "planning-notes"
     },
@@ -103,8 +103,8 @@
       "role": "Immigration Counsel",
       "buildingType": "consulate",
       "label": "Consulate",
-      "q": 2,
-      "r": 7,
+      "q": 6,
+      "r": 14,
       "accent": "#4a7c9b",
       "wikiSectionPlaceholder": "counsel-notes"
     },
@@ -114,8 +114,8 @@
       "role": "Health Coach",
       "buildingType": "gym",
       "label": "Gym",
-      "q": 6,
-      "r": 7,
+      "q": 14,
+      "r": 10,
       "accent": "#c45c5c",
       "wikiSectionPlaceholder": "coaching-notes"
     }

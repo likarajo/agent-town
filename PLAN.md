@@ -91,7 +91,7 @@ interface OwnerConfig {
 }
 ```
 
-Hard blocklist (never fetch or display): paths under `immigration/`, `finance/`, `health/` (case-insensitive prefix match on requested wiki paths).
+Hard blocklist (never fetch or display): paths under `immigration/`, `finance/`, `health/`, `relationships/` (case-insensitive prefix match on requested wiki paths).
 
 ## Privacy model
 
@@ -103,7 +103,7 @@ Hard blocklist (never fetch or display): paths under `immigration/`, `finance/`,
 | Token egress | Sent only to `https://api.github.com` |
 | Forget | Settings exposes **Forget token** (and optionally clear owner config) |
 | Service worker | Must **never** cache GitHub API responses |
-| Sensitive wiki paths | Do not fetch or display `immigration/`, `finance/`, `health/` |
+| Sensitive wiki paths | Do not fetch or display `immigration/`, `finance/`, `health/`, `relationships/` |
 | Employer content | Out of scope — none in source or sample data |
 
 Public UI must make sample mode obvious (banner / “Sample data” labels on sheets).

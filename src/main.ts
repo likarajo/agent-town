@@ -1,9 +1,8 @@
 import townJson from './data/town.json';
 import { getDataMode, loadActivity, loadAllCues } from './github/client';
 import { registerPwa } from './pwa';
-import { createCamera } from './town/camera';
+import { clampScale, createCamera } from './town/camera';
 import { attachTownInput } from './town/input';
-import { tileToScreen } from './town/iso';
 import { TownRenderer } from './town/renderer';
 import type { CameraState, TownData } from './town/types';
 import { wireSettings } from './ui/settings';
@@ -42,14 +41,15 @@ function scheduleDraw(): void {
   raf = requestAnimationFrame(() => renderer.draw(camera));
 }
 
-/** Place the plaza (town center) in the middle of the viewport. */
+/** Center the town and zoom out just enough that every building and label fits. */
 function centerOnTown(width: number, height: number): void {
-  const plaza = town.buildings.find((b) => b.id === 'grok') ?? town.buildings[0];
-  const focus = tileToScreen(plaza.q, plaza.r, town.ground.tileW, town.ground.tileH);
+  const box = renderer.buildingBounds();
+  const pad = 16;
+  const fit = Math.min((width - pad * 2) / (box.maxX - box.minX), (height - pad * 2) / (box.maxY - box.minY));
   camera = createCamera(width, height);
-  camera.scale = width < 700 ? 0.9 : 1.15;
-  camera.x = width / 2 - focus.x * camera.scale;
-  camera.y = height * 0.46 - focus.y * camera.scale;
+  camera.scale = clampScale(Math.min(width < 700 ? 0.9 : 1.15, fit));
+  camera.x = width / 2 - ((box.minX + box.maxX) / 2) * camera.scale;
+  camera.y = height / 2 - ((box.minY + box.maxY) / 2) * camera.scale;
 }
 
 function resize(): void {
