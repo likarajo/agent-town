@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#1a3a2f" />
+    <meta name="description" content="Agent Town — isometric command center for AI assistant bots (sample data by default)." />
+
+    <!-- iOS / PWA -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Agent Town" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="./icons/icon-32.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+
+    <title>Agent Town</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="top-bar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div>
+            <h1>Agent Town</h1>
+            <p class="tagline">Command center for your AI team</p>
+          </div>
+        </div>
+        <div class="top-actions">
+          <span id="data-mode-badge" class="badge sample" title="Public visitors always see sample data">Sample data</span>
+          <button type="button" id="btn-settings" class="icon-btn" aria-label="Settings">Settings</button>
+        </div>
+      </header>
+
+      <main class="stage" aria-label="Isometric town map">
+        <canvas id="town-canvas" aria-label="Agent Town map"></canvas>
+        <div class="hint" id="gesture-hint">Drag to pan · Pinch or scroll to zoom · Tap a building</div>
+      </main>
+
+      <aside id="sheet" class="sheet" hidden aria-live="polite">
+        <div class="sheet-handle" aria-hidden="true"></div>
+        <button type="button" id="sheet-close" class="sheet-close" aria-label="Close">Close</button>
+        <div id="sheet-body" class="sheet-body"></div>
+      </aside>
+
+      <dialog id="settings-dialog" class="settings-dialog">
+        <form method="dialog" id="settings-form" class="settings-form">
+          <header>
+            <h2>Settings</h2>
+            <p class="muted">
+              Token and repo config stay on this device only. The public site never ships real data.
+            </p>
+          </header>
+
+          <section>
+            <h3>GitHub token</h3>
+            <p class="muted small">
+              Paste a fine-grained, <strong>read-only</strong> personal access token. It is stored in
+              <code>localStorage</code> and sent only to <code>api.github.com</code>.
+            </p>
+            <label class="field">
+              <span>Token</span>
+              <input
+                id="token-input"
+                type="password"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="github_pat_… (never committed)"
+              />
+            </label>
+            <div class="row">
+              <button type="button" id="btn-save-token" class="primary">Save token</button>
+              <button type="button" id="btn-forget-token" class="danger">Forget token</button>
+            </div>
+            <p id="token-status" class="status muted small"></p>
+          </section>
+
+          <section>
+            <h3>Owner repo &amp; wiki config</h3>
+            <p class="muted small">
+              Editable locally. Source ships only generic placeholders — never bake real repo lists into the build.
+              Paths under <code>immigration/</code>, <code>finance/</code>, and <code>health/</code> are blocked.
+            </p>
+            <label class="field">
+              <span>Wiki repo (owner/name)</span>
+              <input id="wiki-repo-input" type="text" placeholder="your-user/second-brain" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>Repos JSON map (buildingId → repos[])</span>
+              <textarea id="repos-json-input" rows="6" spellcheck="false" placeholder='{"theo":["your-user/sample-bot-repo"]}'></textarea>
+            </label>
+            <label class="field">
+              <span>Wiki sections JSON (buildingId → section folder)</span>
+              <textarea id="wiki-sections-input" rows="5" spellcheck="false" placeholder='{"theo":"engineering"}'></textarea>
+            </label>
+            <div class="row">
+              <button type="button" id="btn-save-config" class="primary">Save config</button>
+              <button type="button" id="btn-reset-config">Reset placeholders</button>
+            </div>
+            <p id="config-status" class="status muted small"></p>
+          </section>
+
+          <menu class="row end">
+            <button type="submit" value="cancel">Done</button>
+          </menu>
+        </form>
+      </dialog>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
