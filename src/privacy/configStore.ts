@@ -1,70 +1,60 @@
 /**
- * Owner-editable repo/wiki config — localStorage only.
- * Source ships generic placeholders; never bake real repo lists into the build.
+ * Owner config: which second-brain repo and roster file to read. Stored in localStorage on this
+ * device only (or set in the desktop app's `.env`); never baked into the build.
  */
+import { desktop } from '../desktop';
+import { keepSettings } from './persist';
 
 export interface OwnerConfig {
-  wikiRepo: string;
-  reposByBuilding: Record<string, string[]>;
-  wikiSectionByBuilding: Record<string, string>;
+  /** owner/name of the second-brain repo. */
+  secondBrainRepo: string;
+  /** GitHub link to the roster file, or a path inside the second-brain repo. */
+  rosterUrl: string;
 }
 
 const CONFIG_KEY = 'agent-town.owner.config';
 
-/** Generic placeholders only — not real repositories. */
-export const PLACEHOLDER_CONFIG: OwnerConfig = {
-  wikiRepo: 'your-user/second-brain',
-  reposByBuilding: {
-    theo: ['your-user/sample-workshop'],
-    paige: ['your-user/sample-printshop'],
-    ada: ['your-user/sample-lab'],
-    hunter: ['your-user/sample-realty'],
-    haven: ['your-user/sample-depot'],
-    otto: ['your-user/sample-townhall'],
-    warren: ['your-user/sample-bank'],
-    ellis: ['your-user/sample-consulate'],
-    max: ['your-user/sample-gym'],
-    grok: ['your-user/sample-plaza'],
-  },
-  wikiSectionByBuilding: {
-    theo: 'engineering',
-    paige: 'publishing',
-    ada: 'research',
-    hunter: 'realty',
-    haven: 'preparedness',
-    otto: 'operations',
-    warren: 'planning-notes',
-    ellis: 'counsel-notes',
-    max: 'coaching-notes',
-    grok: 'assistant',
-  },
-};
-
-export function getOwnerConfig(): OwnerConfig {
+/** What Settings saved on this device, ignoring any desktop `.env` values. */
+export function getStoredOwnerConfig(): OwnerConfig {
   try {
-    const raw = localStorage.getItem(CONFIG_KEY);
-    if (!raw) return structuredClone(PLACEHOLDER_CONFIG);
-    const parsed = JSON.parse(raw) as Partial<OwnerConfig>;
+    const parsed = JSON.parse(localStorage.getItem(CONFIG_KEY) ?? '{}') as Record<string, unknown>;
+    const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+    // Before the roster existed, the repo was saved as `wikiRepo` with a `your-user/` placeholder.
+    const legacyRepo = text(parsed.wikiRepo).startsWith('your-user/') ? '' : text(parsed.wikiRepo);
     return {
-      wikiRepo: typeof parsed.wikiRepo === 'string' ? parsed.wikiRepo : PLACEHOLDER_CONFIG.wikiRepo,
-      reposByBuilding: {
-        ...PLACEHOLDER_CONFIG.reposByBuilding,
-        ...(parsed.reposByBuilding ?? {}),
-      },
-      wikiSectionByBuilding: {
-        ...PLACEHOLDER_CONFIG.wikiSectionByBuilding,
-        ...(parsed.wikiSectionByBuilding ?? {}),
-      },
+      secondBrainRepo: text(parsed.secondBrainRepo) || legacyRepo,
+      rosterUrl: text(parsed.rosterUrl),
     };
   } catch {
-    return structuredClone(PLACEHOLDER_CONFIG);
+    return { secondBrainRepo: '', rosterUrl: '' };
   }
 }
 
+/** Fields the desktop `.env` sets; Settings shows them read-only. */
+export function envLockedFields(): Record<keyof OwnerConfig, boolean> {
+  return {
+    secondBrainRepo: Boolean(desktop?.secondBrainRepo),
+    rosterUrl: Boolean(desktop?.rosterUrl),
+  };
+}
+
+export function getOwnerConfig(): OwnerConfig {
+  const stored = getStoredOwnerConfig();
+  return {
+    secondBrainRepo: desktop?.secondBrainRepo || stored.secondBrainRepo,
+    rosterUrl: desktop?.rosterUrl || stored.rosterUrl,
+  };
+}
+
 export function setOwnerConfig(config: OwnerConfig): void {
-  localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+  localStorage.setItem(
+    CONFIG_KEY,
+    JSON.stringify({ secondBrainRepo: config.secondBrainRepo.trim(), rosterUrl: config.rosterUrl.trim() }),
+  );
+  keepSettings();
 }
 
 export function resetOwnerConfig(): void {
   localStorage.removeItem(CONFIG_KEY);
+  keepSettings();
 }

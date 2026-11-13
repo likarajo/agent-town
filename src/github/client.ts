@@ -1,37 +1,44 @@
-import { hasToken } from '../privacy/tokenStore';
+import type { TownLoad } from '../roster/load';
+import type { ActivityCue, TownBuilding } from '../town/types';
 import { LiveGitHubDataSource } from './live';
 import { SampleDataSource } from './sample';
-import type { BuildingActivity, DataMode, TownDataSource } from './types';
+import type { BuildingActivity, TownDataSource } from './types';
 
-const sample = new SampleDataSource();
+/** Parallel building loads; keeps a big roster under GitHub's secondary rate limits. */
+const CONCURRENCY = 4;
 
-export function getDataMode(): DataMode {
-  return hasToken() ? 'live' : 'sample';
+export function createDataSource(load: TownLoad): TownDataSource {
+  return load.mode === 'live' ? new LiveGitHubDataSource(load.token, load.wikiRepo) : new SampleDataSource();
 }
 
-export function createDataSource(): TownDataSource {
-  return hasToken() ? new LiveGitHubDataSource() : sample;
-}
-
-export async function loadActivity(buildingId: string): Promise<BuildingActivity> {
-  const source = createDataSource();
+export async function loadActivity(source: TownDataSource, building: TownBuilding): Promise<BuildingActivity> {
   try {
-    return await source.getActivity(buildingId);
-  } catch {
-    // Always fall back to clearly labelled sample data if live fails.
-    return sample.getActivity(buildingId);
+    return await source.getActivity(building);
+  } catch (err) {
+    return {
+      buildingId: building.id,
+      openPrs: [],
+      recentCommits: [],
+      wikiExcerpt: null,
+      isSample: source.mode === 'sample',
+      error: err instanceof Error ? err.message : String(err),
+      cues: { hasOpenPrs: false, hasRecentCommits: false },
+    };
   }
 }
 
 export async function loadAllCues(
-  buildingIds: string[],
-): Promise<Record<string, BuildingActivity['cues'] & { isSample: boolean }>> {
-  const out: Record<string, BuildingActivity['cues'] & { isSample: boolean }> = {};
-  await Promise.all(
-    buildingIds.map(async (id) => {
-      const activity = await loadActivity(id);
-      out[id] = { ...activity.cues, isSample: activity.isSample };
-    }),
-  );
+  source: TownDataSource,
+  buildings: TownBuilding[],
+): Promise<Record<string, ActivityCue>> {
+  const out: Record<string, ActivityCue> = {};
+  const queue = [...buildings];
+  const worker = async () => {
+    for (let building = queue.shift(); building; building = queue.shift()) {
+      const activity = await loadActivity(source, building);
+      out[building.id] = { ...activity.cues, isSample: activity.isSample, error: activity.error };
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, buildings.length) }, worker));
   return out;
 }

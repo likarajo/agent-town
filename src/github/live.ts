@@ -1,5 +1,6 @@
-import { getOwnerConfig } from '../privacy/configStore';
-import { getToken } from '../privacy/tokenStore';
+import { parseRepoFullName, type RepoRef } from '../roster/location';
+import type { TownBuilding } from '../town/types';
+import { getFileText, ghGet, GitHubError, repoPath } from './api';
 import {
   isBlockedWikiPath,
   type BuildingActivity,
@@ -9,149 +10,151 @@ import {
   type WikiExcerpt,
 } from './types';
 
+/** Commits newer than this light a building's windows. */
+const RECENT_MS = 7 * 24 * 60 * 60 * 1000;
+const MAX_REPOS_PER_BOT = 3;
+
+interface GhPull {
+  title: string;
+  number: number;
+  updated_at: string;
+  html_url: string;
+}
+
+interface GhCommit {
+  sha: string;
+  html_url: string;
+  commit: {
+    message: string;
+    author: { date: string } | null;
+    committer: { date: string } | null;
+  };
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function stripFrontMatter(markdown: string): string {
+  return markdown.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '').trim();
+}
+
 /**
- * Live GitHub data source (Milestone 1 skeleton).
- * - Sends the token only to api.github.com
- * - Uses owner config from localStorage (never from the committed build)
- * - Refuses blocked wiki path prefixes
- *
- * Full PR/commit/wiki hydration lands in Milestone 2; Milestone 1 wires the
- * interface and a safe fetch helper so the settings flow is real.
+ * Live GitHub data for one roster. Sends the token only to api.github.com, never reads blocked
+ * wiki paths, and keeps results in memory for this page load only.
  */
-const API = 'https://api.github.com';
-
-async function ghGet<T>(path: string, token: string): Promise<T> {
-  const res = await fetch(`${API}${path}`, {
-    headers: {
-      Accept: 'application/vnd.github+json',
-      Authorization: `Bearer ${token}`,
-      'X-GitHub-Api-Version': '2022-11-28',
-    },
-  });
-  if (!res.ok) {
-    throw new Error(`GitHub API ${res.status} for ${path}`);
-  }
-  return (await res.json()) as T;
-}
-
-function wikiContentPath(section: string): string {
-  const cleaned = section.replace(/^\/+|\/+$/g, '');
-  return `${cleaned}/wiki/index.md`;
-}
-
 export class LiveGitHubDataSource implements TownDataSource {
   readonly mode = 'live' as const;
+  private readonly cache = new Map<string, Promise<BuildingActivity>>();
 
-  async getActivity(buildingId: string): Promise<BuildingActivity> {
-    const token = getToken();
-    if (!token) {
-      throw new Error('No token available for live data');
+  constructor(
+    private readonly token: string,
+    private readonly wikiRepo: RepoRef | null,
+  ) {}
+
+  getActivity(building: TownBuilding): Promise<BuildingActivity> {
+    let pending = this.cache.get(building.id);
+    if (!pending) {
+      pending = this.fetchActivity(building);
+      this.cache.set(building.id, pending);
     }
+    return pending;
+  }
 
-    const config = getOwnerConfig();
-    const repos = config.reposByBuilding[buildingId] ?? [];
-    const section = config.wikiSectionByBuilding[buildingId] ?? '';
+  private async pulls(repo: RepoRef, label: string): Promise<OpenPrSummary[]> {
+    const pulls = await ghGet<GhPull[]>(
+      `${repoPath(repo.owner, repo.repo)}/pulls?state=open&per_page=5`,
+      this.token,
+      label,
+    );
+    return pulls.map((pr) => ({
+      title: pr.title,
+      number: pr.number,
+      updatedAt: pr.updated_at,
+      repoLabel: label,
+      url: pr.html_url,
+    }));
+  }
 
+  private async commits(repo: RepoRef, label: string, path?: string): Promise<CommitSummary[]> {
+    const pathQuery = path ? `&path=${encodeURIComponent(path)}` : '';
+    const commits = await ghGet<GhCommit[]>(
+      `${repoPath(repo.owner, repo.repo)}/commits?per_page=5${pathQuery}`,
+      this.token,
+      label,
+    );
+    return commits.map((c) => ({
+      message: c.commit.message.split('\n')[0] ?? c.commit.message,
+      sha: c.sha.slice(0, 7),
+      date: c.commit.committer?.date ?? c.commit.author?.date ?? '',
+      repoLabel: label,
+      url: c.html_url,
+    }));
+  }
+
+  /** The section's index page; older second brains keep it under `wiki/`. */
+  private async wiki(repo: RepoRef, section: string): Promise<WikiExcerpt> {
+    for (const path of [`${section}/index.md`, `${section}/wiki/index.md`]) {
+      try {
+        return { title: path, markdown: stripFrontMatter(await getFileText({ ...repo, path }, this.token)) };
+      } catch (err) {
+        if (!(err instanceof GitHubError && err.status === 404)) throw err;
+      }
+    }
+    return { title: `${section}/index.md`, markdown: '_This section has no index.md._' };
+  }
+
+  private async fetchActivity(building: TownBuilding): Promise<BuildingActivity> {
+    const errors = new Set<string>();
     const openPrs: OpenPrSummary[] = [];
-    const recentCommits: CommitSummary[] = [];
-
-    // Milestone 1: attempt lightweight live reads when repos look configured;
-    // degrade gracefully so the sheet still works.
-    for (const fullName of repos.slice(0, 3)) {
-      if (!fullName.includes('/') || fullName.startsWith('your-user/')) continue;
-      const [owner, repo] = fullName.split('/');
-      try {
-        const prs = await ghGet<
-          Array<{ title: string; number: number; updated_at: string; html_url: string }>
-        >(`/repos/${owner}/${repo}/pulls?state=open&per_page=5`, token);
-        for (const pr of prs) {
-          openPrs.push({
-            title: pr.title,
-            number: pr.number,
-            updatedAt: pr.updated_at,
-            repoLabel: fullName,
-            url: pr.html_url,
-          });
-        }
-      } catch {
-        // Ignore per-repo failures in the skeleton.
-      }
-
-      try {
-        const commits = await ghGet<
-          Array<{ sha: string; commit: { message: string; author: { date: string } }; html_url: string }>
-        >(`/repos/${owner}/${repo}/commits?per_page=5`, token);
-        for (const c of commits) {
-          recentCommits.push({
-            message: c.commit.message.split('\n')[0] ?? c.commit.message,
-            sha: c.sha.slice(0, 7),
-            date: c.commit.author.date,
-            repoLabel: fullName,
-            url: c.html_url,
-          });
-        }
-      } catch {
-        // Ignore per-repo failures in the skeleton.
-      }
-    }
-
+    const commits: CommitSummary[] = [];
     let wikiExcerpt: WikiExcerpt | null = null;
-    if (section && config.wikiRepo.includes('/') && !config.wikiRepo.startsWith('your-user/')) {
-      const path = wikiContentPath(section);
-      if (isBlockedWikiPath(path) || isBlockedWikiPath(section)) {
-        wikiExcerpt = {
-          title: 'Blocked path',
-          markdown:
-            'This section path is blocked by the privacy model.',
-        };
-      } else {
-        try {
-          const [owner, repo] = config.wikiRepo.split('/');
-          const file = await ghGet<{ content: string; encoding: string; html_url: string; name: string }>(
-            `/repos/${owner}/${repo}/contents/${encodeURIComponent(path).replace(/%2F/g, '/')}`,
-            token,
-          );
-          if (file.encoding === 'base64' && file.content) {
-            const bytes = Uint8Array.from(atob(file.content.replace(/\n/g, '')), (ch) => ch.charCodeAt(0));
-            const markdown = new TextDecoder().decode(bytes);
-            wikiExcerpt = { title: path, markdown };
-          }
-        } catch {
-          wikiExcerpt = {
-            title: path,
-            markdown: '_Wiki page not found or not readable with this token._',
-          };
-        }
-      }
-    } else {
-      wikiExcerpt = {
-        title: 'Configure wiki in Settings',
-        markdown:
-          'Live wiki excerpts appear after you set a real wiki repo and section keys in Settings (stored only on this device).',
-      };
+
+    const jobs: Promise<void>[] = [];
+    const run = <T>(work: Promise<T>, use: (value: T) => void) =>
+      jobs.push(work.then(use, (err: unknown) => void errors.add(errorMessage(err))));
+
+    for (const fullName of building.repos.slice(0, MAX_REPOS_PER_BOT)) {
+      const repo = parseRepoFullName(fullName);
+      if (!repo) continue;
+      run(this.pulls(repo, fullName), (prs) => openPrs.push(...prs));
+      run(this.commits(repo, fullName), (list) => commits.push(...list));
     }
 
-    if (repos.every((r) => r.startsWith('your-user/')) && openPrs.length === 0) {
-      // Owner still on placeholders — surface an empty live shell rather than sample text.
-      return {
-        buildingId,
-        openPrs: [],
-        recentCommits: [],
-        wikiExcerpt,
-        isSample: false,
-        cues: { hasOpenPrs: false, hasRecentCommits: false },
-      };
+    const section = building.wikiSection;
+    if (section && isBlockedWikiPath(section)) {
+      wikiExcerpt = { title: 'Blocked section', markdown: 'This section is blocked by the privacy rules and is never read.' };
+    } else if (section && this.wikiRepo) {
+      run(this.commits(this.wikiRepo, `${this.wikiRepo.repo}/${section}`, section), (list) => commits.push(...list));
+      run(this.wiki(this.wikiRepo, section), (excerpt) => {
+        wikiExcerpt = excerpt;
+      });
     }
+
+    await Promise.all(jobs);
+
+    const seen = new Set<string>();
+    const recentCommits = commits
+      .filter((c) => {
+        if (seen.has(c.sha)) return false;
+        seen.add(c.sha);
+        return true;
+      })
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 8);
+    openPrs.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    const now = Date.now();
 
     return {
-      buildingId,
+      buildingId: building.id,
       openPrs,
       recentCommits,
       wikiExcerpt,
       isSample: false,
+      error: errors.size > 0 ? [...errors].join(' ') : undefined,
       cues: {
         hasOpenPrs: openPrs.length > 0,
-        hasRecentCommits: recentCommits.length > 0,
+        hasRecentCommits: recentCommits.some((c) => now - Date.parse(c.date) < RECENT_MS),
       },
     };
   }

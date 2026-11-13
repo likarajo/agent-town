@@ -1,14 +1,6 @@
-export type BuildingType =
-  | 'workshop'
-  | 'printshop'
-  | 'lab'
-  | 'realty'
-  | 'depot'
-  | 'townhall'
-  | 'bank'
-  | 'consulate'
-  | 'gym'
-  | 'plaza';
+import type { BuildingType } from './catalog';
+
+export type { BuildingType };
 
 export interface TownBuilding {
   id: string;
@@ -19,19 +11,23 @@ export interface TownBuilding {
   q: number;
   r: number;
   accent: string;
-  wikiSectionPlaceholder: string;
+  /** Second-brain section folder the bot owns, or '' when it has none. */
+  wikiSection: string;
+  /** GitHub repos (owner/name) whose PRs and commits show on this building. */
+  repos: string[];
+  /** Set on grey stand-ins for a roster that is loading or failed; shown on hover. */
+  placeholderReason?: string;
+}
+
+export interface Ground {
+  cols: number;
+  rows: number;
+  tileW: number;
+  tileH: number;
 }
 
 export interface TownData {
-  version: number;
-  title: string;
-  privacyNote: string;
-  ground: {
-    cols: number;
-    rows: number;
-    tileW: number;
-    tileH: number;
-  };
+  ground: Ground;
   buildings: TownBuilding[];
 }
 
@@ -45,4 +41,6 @@ export interface ActivityCue {
   hasOpenPrs: boolean;
   hasRecentCommits: boolean;
   isSample: boolean;
+  /** Why some of this bot's data didn't load; the building turns grey and shows it on hover. */
+  error?: string;
 }

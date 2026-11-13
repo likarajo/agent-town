@@ -1,90 +1,128 @@
+import { desktop } from '../desktop';
 import {
+  envLockedFields,
   getOwnerConfig,
-  PLACEHOLDER_CONFIG,
+  getStoredOwnerConfig,
   resetOwnerConfig,
   setOwnerConfig,
-  type OwnerConfig,
 } from '../privacy/configStore';
-import { forgetToken, getToken, setToken } from '../privacy/tokenStore';
+import { forgetToken, getTokenSource, setToken } from '../privacy/tokenStore';
+import { parseRepoFullName } from '../roster/location';
+
+const MASK = '••••••••••••••••';
 
 export function wireSettings(options: {
   dialog: HTMLDialogElement;
   openButton: HTMLElement;
-  onChanged: () => void;
-}): void {
+  /** Reload the town with the current settings; resolves to a one-line status. */
+  onChanged: () => Promise<string>;
+}): { open: () => void } {
   const { dialog, openButton, onChanged } = options;
 
   const tokenInput = dialog.querySelector<HTMLInputElement>('#token-input')!;
   const tokenStatus = dialog.querySelector<HTMLElement>('#token-status')!;
-  const wikiRepoInput = dialog.querySelector<HTMLInputElement>('#wiki-repo-input')!;
-  const reposInput = dialog.querySelector<HTMLTextAreaElement>('#repos-json-input')!;
-  const sectionsInput = dialog.querySelector<HTMLTextAreaElement>('#wiki-sections-input')!;
+  const saveTokenButton = dialog.querySelector<HTMLButtonElement>('#btn-save-token')!;
+  const forgetTokenButton = dialog.querySelector<HTMLButtonElement>('#btn-forget-token')!;
+  const secondBrainInput = dialog.querySelector<HTMLInputElement>('#second-brain-input')!;
+  const rosterInput = dialog.querySelector<HTMLInputElement>('#roster-url-input')!;
+  const saveConfigButton = dialog.querySelector<HTMLButtonElement>('#btn-save-config')!;
+  const resetAllButton = dialog.querySelector<HTMLButtonElement>('#btn-reset-all')!;
   const configStatus = dialog.querySelector<HTMLElement>('#config-status')!;
+  const envNote = dialog.querySelector<HTMLElement>('#desktop-env-note')!;
 
   const refreshFields = () => {
-    const token = getToken();
-    tokenInput.value = token ? '••••••••••••••••' : '';
-    tokenStatus.textContent = token
-      ? 'Token present on this device (not shown). Sent only to api.github.com.'
-      : 'No token stored — showing sample data.';
+    const source = getTokenSource();
+    const tokenFromEnv = source === 'env';
+    tokenInput.value = source ? MASK : '';
+    tokenInput.disabled = tokenFromEnv;
+    saveTokenButton.disabled = tokenFromEnv;
+    forgetTokenButton.disabled = tokenFromEnv || source === null;
+    tokenStatus.textContent = tokenFromEnv
+      ? 'Token comes from the .env file. Edit that file to change it, then restart the app.'
+      : source
+        ? 'Token saved on this device until you forget or reset it (not shown). Sent only to api.github.com.'
+        : 'No token saved, so the town shows sample bots.';
 
     const config = getOwnerConfig();
-    wikiRepoInput.value = config.wikiRepo;
-    reposInput.value = JSON.stringify(config.reposByBuilding, null, 2);
-    sectionsInput.value = JSON.stringify(config.wikiSectionByBuilding, null, 2);
+    const locked = envLockedFields();
+    secondBrainInput.value = config.secondBrainRepo;
+    secondBrainInput.disabled = locked.secondBrainRepo;
+    rosterInput.value = config.rosterUrl;
+    rosterInput.disabled = locked.rosterUrl;
     configStatus.textContent = '';
+
+    if (desktop) {
+      envNote.hidden = false;
+      envNote.textContent = desktop.envFile
+        ? `Desktop app: settings in ${desktop.envFile} take priority over this screen.`
+        : `Desktop app: no .env file found. Put one at ${desktop.envSearchPaths[0] ?? 'the app folder'} to keep the token there.`;
+    }
   };
 
-  openButton.addEventListener('click', () => {
+  const reload = async (status: HTMLElement, done: string) => {
+    status.textContent = `${done} Loading…`;
+    status.textContent = `${done} ${await onChanged()}`;
+  };
+
+  const open = () => {
     refreshFields();
     if (typeof dialog.showModal === 'function') dialog.showModal();
     else dialog.setAttribute('open', '');
-  });
+  };
 
-  dialog.querySelector('#btn-save-token')!.addEventListener('click', () => {
+  openButton.addEventListener('click', open);
+
+  saveTokenButton.addEventListener('click', () => {
     const value = tokenInput.value.trim();
-    if (!value || value.startsWith('••')) {
-      tokenStatus.textContent = 'Enter a new token to save (placeholder dots are ignored).';
+    if (!value || value === MASK) {
+      tokenStatus.textContent = 'Paste a new token to save it.';
       return;
     }
     setToken(value);
-    tokenInput.value = '••••••••••••••••';
-    tokenStatus.textContent = 'Token saved to localStorage on this device.';
-    onChanged();
+    tokenInput.value = MASK;
+    forgetTokenButton.disabled = false;
+    void reload(tokenStatus, 'Token saved on this device.');
   });
 
-  dialog.querySelector('#btn-forget-token')!.addEventListener('click', () => {
+  forgetTokenButton.addEventListener('click', () => {
     forgetToken();
     tokenInput.value = '';
-    tokenStatus.textContent = 'Token removed from this device. Back to sample data.';
-    onChanged();
+    forgetTokenButton.disabled = true;
+    void reload(tokenStatus, 'Token removed from this device.');
   });
 
-  dialog.querySelector('#btn-save-config')!.addEventListener('click', () => {
-    try {
-      const reposByBuilding = JSON.parse(reposInput.value) as OwnerConfig['reposByBuilding'];
-      const wikiSectionByBuilding = JSON.parse(
-        sectionsInput.value,
-      ) as OwnerConfig['wikiSectionByBuilding'];
-      if (typeof reposByBuilding !== 'object' || typeof wikiSectionByBuilding !== 'object') {
-        throw new Error('Invalid JSON objects');
-      }
-      setOwnerConfig({
-        wikiRepo: wikiRepoInput.value.trim() || PLACEHOLDER_CONFIG.wikiRepo,
-        reposByBuilding,
-        wikiSectionByBuilding,
-      });
-      configStatus.textContent = 'Config saved on this device only.';
-      onChanged();
-    } catch (err) {
-      configStatus.textContent = `Could not save: ${(err as Error).message}`;
+  saveConfigButton.addEventListener('click', () => {
+    const locked = envLockedFields();
+    const stored = getStoredOwnerConfig();
+    const secondBrainRepo = locked.secondBrainRepo ? stored.secondBrainRepo : secondBrainInput.value.trim();
+    const rosterUrl = locked.rosterUrl ? stored.rosterUrl : rosterInput.value.trim();
+    if (secondBrainRepo && !parseRepoFullName(secondBrainRepo)) {
+      configStatus.textContent = 'The second-brain repo should look like owner/name.';
+      return;
     }
+    setOwnerConfig({ secondBrainRepo, rosterUrl });
+    void reload(configStatus, 'Saved on this device.');
   });
 
-  dialog.querySelector('#btn-reset-config')!.addEventListener('click', () => {
+  resetAllButton.addEventListener('click', () => {
+    const keepsEnv = desktop?.envFile ? ' Values in the .env file stay; edit that file to change them.' : '';
+    if (!window.confirm(`Remove the saved token and roster settings from this device?${keepsEnv}`)) return;
+    forgetToken();
     resetOwnerConfig();
     refreshFields();
-    configStatus.textContent = 'Restored generic placeholders.';
-    onChanged();
+    void reload(configStatus, 'Settings reset on this device.');
   });
+
+  // Enter would submit the dialog form and close it without saving.
+  const saveOnEnter = (input: HTMLInputElement, button: HTMLButtonElement) =>
+    input.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      button.click();
+    });
+  saveOnEnter(tokenInput, saveTokenButton);
+  saveOnEnter(secondBrainInput, saveConfigButton);
+  saveOnEnter(rosterInput, saveConfigButton);
+
+  return { open };
 }
