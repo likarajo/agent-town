@@ -14,16 +14,29 @@ export function attachTownInput(options: {
   renderer: TownRenderer;
   onSelect: (building: TownBuilding | null) => void;
   onCameraChange: () => void;
+  /** Mouse or pen over a building (or nothing), with the pointer's client position. */
+  onHover?: (building: TownBuilding | null, clientX: number, clientY: number) => void;
 }): () => void {
-  const { canvas, getCamera, renderer, onSelect, onCameraChange } = options;
+  const { canvas, getCamera, renderer, onSelect, onCameraChange, onHover } = options;
   const pointers = new Map<number, PointerState>();
   let lastPinchDist = 0;
   let dragging = false;
   let moved = false;
   let downX = 0;
   let downY = 0;
+  let hoverId: string | null = null;
 
   const redraw = () => onCameraChange();
+
+  const hover = (building: TownBuilding | null, clientX = 0, clientY = 0) => {
+    onHover?.(building, clientX, clientY);
+    const id = building?.id ?? null;
+    if (id === hoverId) return;
+    hoverId = id;
+    renderer.setHover(id);
+    canvas.style.cursor = building ? 'pointer' : 'grab';
+    redraw();
+  };
 
   const onPointerDown = (e: PointerEvent) => {
     canvas.setPointerCapture(e.pointerId);
@@ -40,14 +53,18 @@ export function attachTownInput(options: {
   };
 
   const onPointerMove = (e: PointerEvent) => {
-    if (!pointers.has(e.pointerId)) return;
+    const rect = canvas.getBoundingClientRect();
+
+    if (!pointers.has(e.pointerId)) {
+      if (e.pointerType !== 'touch') {
+        hover(renderer.hitTest(e.clientX - rect.left, e.clientY - rect.top, getCamera()), e.clientX, e.clientY);
+      }
+      return;
+    }
+
     const prev = pointers.get(e.pointerId)!;
     const next = { id: e.pointerId, x: e.clientX, y: e.clientY };
     pointers.set(e.pointerId, next);
-
-    const rect = canvas.getBoundingClientRect();
-    const localX = e.clientX - rect.left;
-    const localY = e.clientY - rect.top;
 
     if (pointers.size === 2) {
       const [a, b] = [...pointers.values()];
@@ -61,19 +78,18 @@ export function attachTownInput(options: {
       }
       lastPinchDist = dist;
       moved = true;
+      hover(null);
       return;
     }
 
     if (dragging && pointers.size === 1) {
       const dx = next.x - prev.x;
       const dy = next.y - prev.y;
-      if (Math.hypot(e.clientX - downX, e.clientY - downY) > 6) moved = true;
+      if (Math.hypot(e.clientX - downX, e.clientY - downY) > 6) {
+        moved = true;
+        hover(null);
+      }
       panCamera(getCamera(), dx, dy);
-      redraw();
-    } else {
-      const hit = renderer.hitTest(localX, localY, getCamera());
-      renderer.setHover(hit?.id ?? null);
-      canvas.style.cursor = hit ? 'pointer' : 'grab';
       redraw();
     }
   };
@@ -91,11 +107,14 @@ export function attachTownInput(options: {
     }
   };
 
+  const onPointerLeave = () => hover(null);
+
   const onWheel = (e: WheelEvent) => {
     e.preventDefault();
     const rect = canvas.getBoundingClientRect();
     const factor = e.deltaY < 0 ? 1.08 : 1 / 1.08;
     zoomAt(getCamera(), e.clientX - rect.left, e.clientY - rect.top, factor);
+    hover(null);
     redraw();
   };
 
@@ -103,6 +122,7 @@ export function attachTownInput(options: {
   canvas.addEventListener('pointermove', onPointerMove);
   canvas.addEventListener('pointerup', onPointerUp);
   canvas.addEventListener('pointercancel', onPointerUp);
+  canvas.addEventListener('pointerleave', onPointerLeave);
   canvas.addEventListener('wheel', onWheel, { passive: false });
 
   return () => {
@@ -110,6 +130,7 @@ export function attachTownInput(options: {
     canvas.removeEventListener('pointermove', onPointerMove);
     canvas.removeEventListener('pointerup', onPointerUp);
     canvas.removeEventListener('pointercancel', onPointerUp);
+    canvas.removeEventListener('pointerleave', onPointerLeave);
     canvas.removeEventListener('wheel', onWheel);
   };
 }

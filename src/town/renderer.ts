@@ -1,3 +1,4 @@
+import { PLACEHOLDER_ACCENT } from './catalog';
 import { tileToScreen } from './iso';
 import type { ActivityCue, CameraState, TownBuilding, TownData } from './types';
 
@@ -21,11 +22,17 @@ export class TownRenderer {
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
-    private readonly town: TownData,
+    private town: TownData,
   ) {
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Canvas 2D unavailable');
     this.ctx = ctx;
+  }
+
+  setTown(town: TownData): void {
+    this.town = town;
+    this.cues = {};
+    this.hoverId = null;
   }
 
   setCues(cues: Record<string, ActivityCue>): void {
@@ -34,6 +41,11 @@ export class TownRenderer {
 
   setHover(id: string | null): void {
     this.hoverId = id;
+  }
+
+  /** Grey stand-ins: a roster that hasn't loaded, or a bot whose data failed to load. */
+  isPlaceholder(b: TownBuilding): boolean {
+    return b.placeholderReason !== undefined || Boolean(this.cues[b.id]?.error);
   }
 
   resize(cssWidth: number, cssHeight: number): void {
@@ -88,8 +100,16 @@ export class TownRenderer {
 
   /** World-space box around every building, padded for the tallest flag and the widest label. */
   buildingBounds(): { minX: number; maxX: number; minY: number; maxY: number } {
-    const { tileW, tileH } = this.town.ground;
-    const points = this.town.buildings.map((b) => tileToScreen(b.q, b.r, tileW, tileH));
+    const { cols, rows, tileW, tileH } = this.town.ground;
+    const corners: Array<[number, number]> = [
+      [0, 0],
+      [cols - 1, 0],
+      [0, rows - 1],
+      [cols - 1, rows - 1],
+    ];
+    const points = this.town.buildings.length
+      ? this.town.buildings.map((b) => tileToScreen(b.q, b.r, tileW, tileH))
+      : corners.map(([q, r]) => tileToScreen(q, r, tileW, tileH));
     const xs = points.map((p) => p.x);
     const ys = points.map((p) => p.y);
     return {
@@ -139,7 +159,7 @@ export class TownRenderer {
       }
     }
 
-    const plaza = town.buildings.find((b) => b.buildingType === 'plaza');
+    const plaza = town.buildings.find((b) => b.buildingType === 'plaza' && b.placeholderReason === undefined);
     if (!plaza) return;
 
     // Path ring around plaza
@@ -181,43 +201,52 @@ export class TownRenderer {
     ctx.fill();
     ctx.shadowBlur = 0;
 
-    switch (b.buildingType) {
-      case 'plaza':
-        this.drawPlaza(b, lit, flag);
-        break;
-      case 'townhall':
-        this.drawTownHall(b, lit, flag);
-        break;
-      case 'workshop':
-        this.drawWorkshop(b, lit, flag);
-        break;
-      case 'printshop':
-        this.drawPrintShop(b, lit, flag);
-        break;
-      case 'lab':
-        this.drawLab(b, lit, flag);
-        break;
-      case 'realty':
-        this.drawRealty(b, lit, flag);
-        break;
-      case 'depot':
-        this.drawDepot(b, lit, flag);
-        break;
-      case 'bank':
-        this.drawBank(b, lit, flag);
-        break;
-      case 'consulate':
-        this.drawConsulate(b, lit, flag);
-        break;
-      case 'gym':
-        this.drawGym(b, lit, flag);
-        break;
-      default:
-        this.drawBlock(b.accent, 40, 36, lit, flag);
+    if (this.isPlaceholder(b)) {
+      this.drawPlaceholder();
+    } else {
+      switch (b.buildingType) {
+        case 'plaza':
+          this.drawPlaza(b, lit, flag);
+          break;
+        case 'townhall':
+          this.drawTownHall(b, lit, flag);
+          break;
+        case 'workshop':
+          this.drawWorkshop(b, lit, flag);
+          break;
+        case 'printshop':
+          this.drawPrintShop(b, lit, flag);
+          break;
+        case 'lab':
+          this.drawLab(b, lit, flag);
+          break;
+        case 'realty':
+          this.drawRealty(b, lit, flag);
+          break;
+        case 'depot':
+          this.drawDepot(b, lit, flag);
+          break;
+        case 'bank':
+          this.drawBank(b, lit, flag);
+          break;
+        case 'consulate':
+          this.drawConsulate(b, lit, flag);
+          break;
+        case 'gym':
+          this.drawGym(b, lit, flag);
+          break;
+        default:
+          this.drawBlock(b.accent, 40, 36, lit, flag);
+      }
     }
 
-    this.drawLabel(b);
+    if (b.name) this.drawLabel(b);
     ctx.restore();
+  }
+
+  /** The one placeholder look, whatever the bot's architecture: a plain grey block, no lights or flag. */
+  private drawPlaceholder(): void {
+    this.drawBlock(PLACEHOLDER_ACCENT, 44, 36, false, false);
   }
 
   private drawLabel(b: TownBuilding): void {

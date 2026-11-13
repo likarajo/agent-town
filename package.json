@@ -1,17 +1,67 @@
 {
   "name": "agent-town",
+  "productName": "Agent Town",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Isometric town command center for AI assistant bots",
+  "author": "likarajo",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "build:desktop": "tsc --noEmit && vite build --mode desktop",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "desktop": "npm run build:desktop && electron .",
+    "desktop:dist": "npm run build:desktop && electron-builder"
+  },
+  "build": {
+    "appId": "io.github.likarajo.agenttown",
+    "productName": "Agent Town",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist-desktop/**/*",
+      "electron/**/*",
+      "package.json",
+      "!**/.env",
+      "!**/.env.*"
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": "universal"
+        },
+        {
+          "target": "zip",
+          "arch": "universal"
+        }
+      ],
+      "category": "public.app-category.productivity",
+      "icon": "public/icons/icon-512.png"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ],
+      "icon": "public/icons/icon-512.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    }
   },
   "devDependencies": {
+    "electron": "^45.3.2",
+    "electron-builder": "^26.18.0",
     "typescript": "^5.8.2",
-    "vite": "^6.2.2"
+    "vite": "^6.2.2",
+    "vitest": "^5.1.0"
   }
 }

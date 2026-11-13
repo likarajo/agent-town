@@ -1,7 +1,9 @@
 /** Register the shell-only service worker. Never caches GitHub API traffic (enforced in sw.js). */
+import { desktop } from './desktop';
 
 export async function registerPwa(): Promise<void> {
-  if (!('serviceWorker' in navigator)) return;
+  // The desktop app loads from disk, where service workers don't apply.
+  if (!('serviceWorker' in navigator) || desktop || window.location.protocol === 'file:') return;
 
   try {
     const base = new URL(import.meta.env.BASE_URL, window.location.href);

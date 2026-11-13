@@ -33,13 +33,26 @@
           </div>
         </div>
         <div class="top-actions">
-          <span id="data-mode-badge" class="badge sample" title="Public visitors always see sample data">Sample data</span>
+          <button
+            type="button"
+            id="data-mode-badge"
+            class="badge sample"
+            aria-controls="sheet"
+            title="Sample bots and activity. Click to see the sample data."
+          >
+            Sample data
+          </button>
           <button type="button" id="btn-settings" class="icon-btn" aria-label="Settings">Settings</button>
         </div>
       </header>
 
       <main class="stage" aria-label="Isometric town map">
         <canvas id="town-canvas" aria-label="Agent Town map"></canvas>
+        <div id="town-banner" class="banner" role="status" hidden>
+          <span id="town-banner-text"></span>
+          <button type="button" id="town-banner-settings">Settings</button>
+        </div>
+        <div id="town-tooltip" class="tooltip" role="tooltip" hidden></div>
         <div class="hint" id="gesture-hint">Drag to pan · Pinch or scroll to zoom · Tap a building</div>
       </main>
 
@@ -54,15 +67,17 @@
           <header>
             <h2>Settings</h2>
             <p class="muted">
-              Token and repo config stay on this device only. The public site never ships real data.
+              Enter these once: they stay saved on this device until you reset them. The public site only
+              ever shows sample bots.
             </p>
+            <p id="desktop-env-note" class="muted small" hidden></p>
           </header>
 
           <section>
             <h3>GitHub token</h3>
             <p class="muted small">
               Paste a fine-grained, <strong>read-only</strong> personal access token. It is stored in
-              <code>localStorage</code> and sent only to <code>api.github.com</code>.
+              <code>localStorage</code> on this device and sent only to <code>api.github.com</code>.
             </p>
             <label class="field">
               <span>Token</span>
@@ -82,30 +97,42 @@
           </section>
 
           <section>
-            <h3>Owner repo &amp; wiki config</h3>
+            <h3>Your roster</h3>
             <p class="muted small">
-              Editable locally. Source ships only generic placeholders — never bake real repo lists into the build.
+              With a token saved, the town draws the bots in your roster instead of the sample ones.
             </p>
             <label class="field">
-              <span>Wiki repo (owner/name)</span>
-              <input id="wiki-repo-input" type="text" placeholder="your-user/second-brain" autocomplete="off" />
+              <span>Second-brain repo (owner/name)</span>
+              <input
+                id="second-brain-input"
+                type="text"
+                placeholder="your-user/second-brain"
+                autocomplete="off"
+                spellcheck="false"
+              />
             </label>
             <label class="field">
-              <span>Repos JSON map (buildingId → repos[])</span>
-              <textarea id="repos-json-input" rows="6" spellcheck="false" placeholder='{"theo":["your-user/sample-bot-repo"]}'></textarea>
-            </label>
-            <label class="field">
-              <span>Wiki sections JSON (buildingId → section folder)</span>
-              <textarea id="wiki-sections-input" rows="5" spellcheck="false" placeholder='{"theo":"engineering"}'></textarea>
+              <span>Roster URL</span>
+              <input
+                id="roster-url-input"
+                type="text"
+                placeholder="https://github.com/your-user/second-brain/blob/main/roster.md"
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <span class="muted small">
+                A GitHub file link, or a path inside the second-brain repo. The file needs a Markdown table
+                with a <code>Bot</code> column.
+              </span>
             </label>
             <div class="row">
-              <button type="button" id="btn-save-config" class="primary">Save config</button>
-              <button type="button" id="btn-reset-config">Reset placeholders</button>
+              <button type="button" id="btn-save-config" class="primary">Save and load</button>
             </div>
             <p id="config-status" class="status muted small"></p>
           </section>
 
-          <menu class="row end">
+          <menu class="row end settings-actions">
+            <button type="button" id="btn-reset-all" class="danger">Reset all settings</button>
             <button type="submit" value="cancel">Done</button>
           </menu>
         </form>

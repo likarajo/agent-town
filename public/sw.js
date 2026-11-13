@@ -1,7 +1,7 @@
 /* Agent Town service worker — offline shell only.
  * NEVER cache GitHub API responses (api.github.com).
  */
-const SHELL_CACHE = 'agent-town-shell-v1';
+const SHELL_CACHE = 'agent-town-shell-v3';
 
 // Precache is filled at install from the Vite-emitted asset list posted by the page,
 // plus a small static allowlist of shell URLs relative to this worker's scope.
@@ -74,6 +74,26 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
 
+  // Pages go to the network first, so a new deploy shows on the next load instead of a stale page;
+  // the cached shell is only the offline fallback.
+  if (req.mode === 'navigate') {
+    event.respondWith(
+      (async () => {
+        const cache = await caches.open(SHELL_CACHE);
+        try {
+          const fresh = await fetch(req);
+          if (fresh.ok) await cache.put('./index.html', fresh.clone());
+          return fresh;
+        } catch {
+          const fallback = await cache.match('./index.html');
+          if (fallback) return fallback;
+          throw new Error('offline');
+        }
+      })(),
+    );
+    return;
+  }
+
   event.respondWith(
     (async () => {
       const cache = await caches.open(SHELL_CACHE);
@@ -96,10 +116,6 @@ self.addEventListener('fetch', (event) => {
         }
         return fresh;
       } catch {
-        if (req.mode === 'navigate') {
-          const fallback = await cache.match('./index.html');
-          if (fallback) return fallback;
-        }
         throw new Error('offline');
       }
     })(),
