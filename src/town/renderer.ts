@@ -1,24 +1,50 @@
+import { BUILDING_SCALE, designOf, PLACEHOLDER_DESIGN, type Design } from './buildings';
 import { PLACEHOLDER_ACCENT } from './catalog';
+import { mixHex } from './color';
 import { tileToScreen } from './iso';
+import {
+  layoutTown,
+  PLAZA_RADIUS,
+  strollPosition,
+  tileNoise,
+  walkerPosition,
+  type Decoration,
+  type Direction,
+  type TownLayout,
+} from './layout';
+import { Painter, type Point } from './paint';
+import { hourOf, sceneAt } from './scene';
 import type { ActivityCue, CameraState, TownBuilding, TownData } from './types';
 
-function hexToRgb(hex: string): { r: number; g: number; b: number } {
-  const h = hex.replace('#', '');
-  const n = parseInt(h.length === 3 ? h.split('').map((c) => c + c).join('') : h, 16);
-  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+interface Walker {
+  q: number;
+  r: number;
+  accent: string;
+  moving: boolean;
 }
 
-function shade(hex: string, amount: number): string {
-  const { r, g, b } = hexToRgb(hex);
-  const t = (v: number) => Math.min(255, Math.max(0, Math.round(v + amount * 255)));
-  return `rgb(${t(r)}, ${t(g)}, ${t(b)})`;
+interface LabelBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
+
+const ISLAND_DEPTH = 26;
+const LABEL_TOP = 24;
+const LABEL_HEIGHT = 29;
+const FONT = '"Segoe UI", system-ui, sans-serif';
+
+const ARM: Record<Direction, [number, number]> = { 'q+': [1, 0], 'q-': [-1, 0], 'r+': [0, 1], 'r-': [0, -1] };
 
 export class TownRenderer {
   private readonly ctx: CanvasRenderingContext2D;
   private cues: Record<string, ActivityCue> = {};
   private hoverId: string | null = null;
   private dpr = 1;
+  private layout: TownLayout;
+  private fixedHour: number | null = null;
+  private readonly labels = new Map<string, LabelBox>();
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -27,12 +53,15 @@ export class TownRenderer {
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Canvas 2D unavailable');
     this.ctx = ctx;
+    this.layout = layoutTown(town);
   }
 
   setTown(town: TownData): void {
     this.town = town;
+    this.layout = layoutTown(town);
     this.cues = {};
     this.hoverId = null;
+    this.labels.clear();
   }
 
   setCues(cues: Record<string, ActivityCue>): void {
@@ -41,6 +70,11 @@ export class TownRenderer {
 
   setHover(id: string | null): void {
     this.hoverId = id;
+  }
+
+  /** Pin the time of day (hours, 0–24), or pass null to follow the clock. */
+  setClock(hour: number | null): void {
+    this.fixedHour = hour;
   }
 
   /** Grey stand-ins: a roster that hasn't loaded, or a bot whose data failed to load. */
@@ -57,425 +91,490 @@ export class TownRenderer {
     this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
   }
 
-  draw(camera: CameraState): void {
+  /** `now` drives the animation (milliseconds); pass a constant to hold everything still. */
+  draw(camera: CameraState, now = performance.now()): void {
     const { ctx, town } = this;
     const w = this.canvas.clientWidth;
     const h = this.canvas.clientHeight;
+    const scene = sceneAt(this.fixedHour ?? hourOf(new Date()));
+    const p = new Painter(ctx, scene, town.ground.tileW, town.ground.tileH, now);
 
     ctx.clearRect(0, 0, w, h);
-    this.drawBackdrop(w, h);
+    this.drawSky(p, w, h);
 
     ctx.save();
     ctx.translate(camera.x, camera.y);
     ctx.scale(camera.scale, camera.scale);
-
-    this.drawGround();
-
-    const sorted = [...town.buildings].sort((a, b) => a.q + a.r - (b.q + b.r));
-    for (const b of sorted) {
-      this.drawBuilding(b);
-    }
-
+    this.drawIsland(p);
+    this.drawRoads(p);
+    this.drawLots(p);
+    this.drawShadows(p);
+    this.drawGlow(p);
+    this.drawHover(p);
+    this.drawObjects(p);
+    this.drawLabels(p);
     ctx.restore();
   }
 
-  /** Hit-test buildings in screen space; returns topmost match. */
+  /** The building under a screen point: labels first (they sit on top), then the frontmost building. */
   hitTest(screenX: number, screenY: number, camera: CameraState): TownBuilding | null {
+    const x = (screenX - camera.x) / camera.scale;
+    const y = (screenY - camera.y) / camera.scale;
+    for (const b of this.town.buildings) {
+      const box = this.labels.get(b.id);
+      if (box && x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h) return b;
+    }
     const { tileW, tileH } = this.town.ground;
-    const localX = (screenX - camera.x) / camera.scale;
-    const localY = (screenY - camera.y) / camera.scale;
-
-    const sorted = [...this.town.buildings].sort((a, b) => b.q + b.r - (a.q + a.r));
-    for (const b of sorted) {
-      const p = tileToScreen(b.q, b.r, tileW, tileH);
-      // Diamond footprint + building volume approx
-      const dx = Math.abs(localX - p.x);
-      const dy = localY - (p.y - 36);
-      if (dx / (tileW * 0.55) + Math.abs(dy) / 70 < 1) {
+    const frontFirst = [...this.town.buildings].sort((a, b) => b.q + b.r - (a.q + a.r));
+    for (const b of frontFirst) {
+      const d = this.design(b);
+      const [cx, cy] = this.center(b.q, b.r);
+      const reach = (d.extent[0] + d.extent[1]) * BUILDING_SCALE;
+      const top = d.height * BUILDING_SCALE;
+      if (Math.abs(x - cx) <= reach * (tileW / 2) + 2 && y <= cy + reach * (tileH / 2) + 2 && y >= cy - top - 4) {
         return b;
       }
     }
     return null;
   }
 
-  /** World-space box around every building, padded for the tallest flag and the widest label. */
+  /** World-space box around every building, its flag and its label. */
   buildingBounds(): { minX: number; maxX: number; minY: number; maxY: number } {
     const { cols, rows, tileW, tileH } = this.town.ground;
-    const corners: Array<[number, number]> = [
-      [0, 0],
-      [cols - 1, 0],
-      [0, rows - 1],
-      [cols - 1, rows - 1],
-    ];
-    const points = this.town.buildings.length
-      ? this.town.buildings.map((b) => tileToScreen(b.q, b.r, tileW, tileH))
-      : corners.map(([q, r]) => tileToScreen(q, r, tileW, tileH));
-    const xs = points.map((p) => p.x);
-    const ys = points.map((p) => p.y);
-    return {
-      minX: Math.min(...xs) - 44,
-      maxX: Math.max(...xs) + 44,
-      minY: Math.min(...ys) - 80,
-      maxY: Math.max(...ys) + 76,
-    };
+    if (!this.town.buildings.length) {
+      const top = tileToScreen(0, 0, tileW, tileH);
+      const bottom = tileToScreen(cols, rows, tileW, tileH);
+      return {
+        minX: tileToScreen(0, rows, tileW, tileH).x,
+        maxX: tileToScreen(cols, 0, tileW, tileH).x,
+        minY: top.y,
+        maxY: bottom.y + ISLAND_DEPTH,
+      };
+    }
+    const box = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
+    for (const b of this.town.buildings) {
+      const d = this.design(b);
+      const [x, y] = this.center(b.q, b.r);
+      const half = Math.max((d.extent[0] + d.extent[1]) * BUILDING_SCALE * (tileW / 2), 46);
+      box.minX = Math.min(box.minX, x - half);
+      box.maxX = Math.max(box.maxX, x + half);
+      box.minY = Math.min(box.minY, y - (d.height + d.pole) * BUILDING_SCALE - 6);
+      box.maxY = Math.max(box.maxY, y + LABEL_TOP + LABEL_HEIGHT + 6);
+    }
+    return box;
   }
 
-  private drawBackdrop(w: number, h: number): void {
+  /** Where a building stands, in world space before the camera is applied. */
+  anchorOf(b: TownBuilding): Point {
+    return this.center(b.q, b.r);
+  }
+
+  private design(b: TownBuilding): Design {
+    return this.isPlaceholder(b) ? PLACEHOLDER_DESIGN : designOf(b.buildingType);
+  }
+
+  /** Screen point at the middle of tile (q, r); fractional tiles are fine. */
+  private center(q: number, r: number): Point {
+    const { tileW, tileH } = this.town.ground;
+    const p = tileToScreen(q + 0.5, r + 0.5, tileW, tileH);
+    return [p.x, p.y];
+  }
+
+  /** Run `paint` with the origin moved to the middle of tile (q, r). */
+  private atTile(q: number, r: number, paint: () => void): void {
+    const [x, y] = this.center(q, r);
+    this.ctx.save();
+    this.ctx.translate(x, y);
+    paint();
+    this.ctx.restore();
+  }
+
+  /** The loaded plaza building at the hub, whose square every street leads into. */
+  private plaza(): TownBuilding | undefined {
+    const { hub } = this.layout;
+    return this.town.buildings.find(
+      (b) => b.buildingType === 'plaza' && b.q === hub.q && b.r === hub.r && !this.isPlaceholder(b),
+    );
+  }
+
+  private drawSky(p: Painter, w: number, h: number): void {
     const { ctx } = this;
-    const g = ctx.createLinearGradient(0, 0, 0, h);
-    g.addColorStop(0, '#87b5a4');
-    g.addColorStop(0.45, '#5f8f7c');
-    g.addColorStop(1, '#2f5a4a');
-    ctx.fillStyle = g;
+    const { scene, now } = p;
+    const sky = ctx.createLinearGradient(0, 0, 0, h);
+    sky.addColorStop(0, scene.skyTop);
+    sky.addColorStop(1, scene.skyBottom);
+    ctx.fillStyle = sky;
     ctx.fillRect(0, 0, w, h);
 
-    // Soft sun glow
-    const sun = ctx.createRadialGradient(w * 0.78, h * 0.12, 10, w * 0.78, h * 0.12, w * 0.35);
-    sun.addColorStop(0, 'rgba(255, 236, 180, 0.55)');
-    sun.addColorStop(1, 'rgba(255, 236, 180, 0)');
-    ctx.fillStyle = sun;
-    ctx.fillRect(0, 0, w, h);
+    if (scene.night > 0.05) {
+      ctx.fillStyle = '#ffffff';
+      for (let i = 0; i < 80; i++) {
+        ctx.globalAlpha = scene.night * 0.85 * (0.55 + 0.45 * Math.sin(now / 700 + i * 1.7));
+        const size = tileNoise(i, 9, 3) < 0.15 ? 2 : 1.2;
+        ctx.fillRect(tileNoise(i, 0, 7) * w, tileNoise(i, 1, 7) * h * 0.65, size, size);
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    if (scene.sky.body !== 'none') {
+      const sun = scene.sky.body === 'sun';
+      const x = scene.sky.x * w;
+      const y = scene.sky.y * h;
+      const glow = ctx.createRadialGradient(x, y, 0, x, y, Math.max(w, h) * (sun ? 0.35 : 0.18));
+      glow.addColorStop(0, sun ? 'rgba(255, 238, 196, 0.6)' : 'rgba(205, 218, 255, 0.28)');
+      glow.addColorStop(1, 'rgba(255, 238, 196, 0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(0, 0, w, h);
+      p.ellipse(x, y, sun ? 15 : 11, sun ? 15 : 11, sun ? '#fff3d2' : '#eef1fb');
+    }
+
+    const cloud = mixHex('#ffffff', scene.skyBottom, 0.25);
+    ctx.globalAlpha = 0.75 - scene.night * 0.55;
+    for (let i = 0; i < 4; i++) {
+      const span = w + 260;
+      const x = ((tileNoise(i, 2, 11) * span + now * (0.006 + 0.003 * i)) % span) - 130;
+      const y = h * (0.08 + 0.09 * i + 0.05 * tileNoise(i, 3, 11));
+      const s = 0.7 + tileNoise(i, 4, 11) * 0.6;
+      for (const [ox, oy, r] of [
+        [-22, 4, 14],
+        [0, -4, 19],
+        [22, 3, 15],
+        [40, 7, 10],
+      ]) {
+        p.ellipse(x + ox * s, y + oy * s, r * s * 1.25, r * s * 0.8, cloud);
+      }
+    }
+    ctx.globalAlpha = 1;
   }
 
-  private drawGround(): void {
-    const { ctx, town } = this;
-    const { cols, rows, tileW, tileH } = town.ground;
+  /** The town sits on a floating island: a lawn on a slab of earth. */
+  private drawIsland(p: Painter): void {
+    const { ctx } = this;
+    const { cols, rows, tileW, tileH } = this.town.ground;
+    const corner = (q: number, r: number): Point => {
+      const t = tileToScreen(q, r, tileW, tileH);
+      return [t.x, t.y];
+    };
+    const down = ([x, y]: Point, d: number): Point => [x, y + d];
+    const top = corner(0, 0);
+    const right = corner(cols, 0);
+    const bottom = corner(cols, rows);
+    const left = corner(0, rows);
 
+    const rx = (right[0] - left[0]) / 2;
+    const ry = (bottom[1] - top[1]) / 2;
+    ctx.save();
+    ctx.translate((left[0] + right[0]) / 2, (top[1] + bottom[1]) / 2 + ISLAND_DEPTH + 26);
+    ctx.scale(1, ry / rx);
+    const shade = ctx.createRadialGradient(0, 0, rx * 0.3, 0, 0, rx);
+    shade.addColorStop(0, 'rgba(8, 18, 28, 0.28)');
+    shade.addColorStop(1, 'rgba(8, 18, 28, 0)');
+    ctx.fillStyle = shade;
+    ctx.beginPath();
+    ctx.arc(0, 0, rx, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    p.poly([left, bottom, down(bottom, ISLAND_DEPTH), down(left, ISLAND_DEPTH)], p.lit('#8c6b4b'));
+    p.poly([bottom, right, down(right, ISLAND_DEPTH), down(bottom, ISLAND_DEPTH)], p.lit('#6f5339'));
+    p.poly([left, bottom, down(bottom, 5), down(left, 5)], p.lit('#4f8a4c'));
+    p.poly([bottom, right, down(right, 5), down(bottom, 5)], p.lit('#41763f'));
+    p.poly([top, right, bottom, left], p.lit('#7fb069'));
+
+    const [mx, my] = p.groundRadii(0.42);
     for (let r = 0; r < rows; r++) {
       for (let q = 0; q < cols; q++) {
-        const { x, y } = tileToScreen(q, r, tileW, tileH);
-        const checker = (q + r) % 2 === 0;
-        ctx.beginPath();
-        ctx.moveTo(x, y);
-        ctx.lineTo(x + tileW / 2, y + tileH / 2);
-        ctx.lineTo(x, y + tileH);
-        ctx.lineTo(x - tileW / 2, y + tileH / 2);
-        ctx.closePath();
-        ctx.fillStyle = checker ? '#3f6e58' : '#3a6752';
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(20, 40, 30, 0.18)';
-        ctx.lineWidth = 1;
-        ctx.stroke();
+        const n = tileNoise(q, r, 21);
+        if (n > 0.4) continue;
+        const [x, y] = this.center(q + (tileNoise(q, r, 22) - 0.5) * 0.3, r + (tileNoise(q, r, 23) - 0.5) * 0.3);
+        p.ellipse(x, y, mx, my, p.lit('#7fb069', n < 0.2 ? 0.05 : -0.05));
       }
     }
-
-    const plaza = town.buildings.find((b) => b.buildingType === 'plaza' && b.placeholderReason === undefined);
-    if (!plaza) return;
-
-    // Path ring around plaza
-    ctx.strokeStyle = 'rgba(210, 190, 140, 0.35)';
-    ctx.lineWidth = 10;
-    ctx.beginPath();
-    for (let i = 0; i <= 24; i++) {
-      const t = (i / 24) * Math.PI * 2;
-      const aq = plaza.q + Math.cos(t) * 1.35;
-      const ar = plaza.r + Math.sin(t) * 1.35;
-      const p = tileToScreen(aq, ar, tileW, tileH);
-      if (i === 0) ctx.moveTo(p.x, p.y + tileH / 2);
-      else ctx.lineTo(p.x, p.y + tileH / 2);
-    }
-    ctx.stroke();
   }
 
-  private drawBuilding(b: TownBuilding): void {
-    const { ctx, town } = this;
-    const { tileW, tileH } = town.ground;
-    const { x, y } = tileToScreen(b.q, b.r, tileW, tileH);
-    const cue = this.cues[b.id];
-    const lit = Boolean(cue?.hasRecentCommits);
-    const flag = Boolean(cue?.hasOpenPrs);
-    const hover = this.hoverId === b.id;
-
-    ctx.save();
-    ctx.translate(x, y);
-
-    if (hover) {
-      ctx.shadowColor = 'rgba(255, 250, 220, 0.65)';
-      ctx.shadowBlur = 18;
-    }
-
-    // Shadow
-    ctx.fillStyle = 'rgba(10, 25, 18, 0.28)';
-    ctx.beginPath();
-    ctx.ellipse(0, tileH * 0.55, tileW * 0.42, tileH * 0.22, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.shadowBlur = 0;
-
-    if (this.isPlaceholder(b)) {
-      this.drawPlaceholder();
-    } else {
-      switch (b.buildingType) {
-        case 'plaza':
-          this.drawPlaza(b, lit, flag);
-          break;
-        case 'townhall':
-          this.drawTownHall(b, lit, flag);
-          break;
-        case 'workshop':
-          this.drawWorkshop(b, lit, flag);
-          break;
-        case 'printshop':
-          this.drawPrintShop(b, lit, flag);
-          break;
-        case 'lab':
-          this.drawLab(b, lit, flag);
-          break;
-        case 'realty':
-          this.drawRealty(b, lit, flag);
-          break;
-        case 'depot':
-          this.drawDepot(b, lit, flag);
-          break;
-        case 'bank':
-          this.drawBank(b, lit, flag);
-          break;
-        case 'consulate':
-          this.drawConsulate(b, lit, flag);
-          break;
-        case 'gym':
-          this.drawGym(b, lit, flag);
-          break;
-        default:
-          this.drawBlock(b.accent, 40, 36, lit, flag);
+  /** Kerbs, then asphalt, then dashed centre lines, so crossings merge cleanly. */
+  private drawRoads(p: Painter): void {
+    const { ctx } = this;
+    const arm = (link: Direction, hw: number): Point[] => {
+      const [du, dv] = ARM[link];
+      return du !== 0
+        ? [p.at(0, -hw), p.at(du * 0.5, -hw), p.at(du * 0.5, hw), p.at(0, hw)]
+        : [p.at(-hw, 0), p.at(-hw, dv * 0.5), p.at(hw, dv * 0.5), p.at(hw, 0)];
+    };
+    for (const [hw, color] of [
+      [0.27, '#d8d0c0'],
+      [0.19, '#6f757b'],
+    ] as const) {
+      const fill = p.lit(color);
+      for (const road of this.layout.roads) {
+        this.atTile(road.q, road.r, () => {
+          p.poly([p.at(hw, -hw), p.at(hw, hw), p.at(-hw, hw), p.at(-hw, -hw)], fill);
+          for (const link of road.links) p.poly(arm(link, hw), fill);
+        });
       }
     }
-
-    if (b.name) this.drawLabel(b);
-    ctx.restore();
-  }
-
-  /** The one placeholder look, whatever the bot's architecture: a plain grey block, no lights or flag. */
-  private drawPlaceholder(): void {
-    this.drawBlock(PLACEHOLDER_ACCENT, 44, 36, false, false);
-  }
-
-  private drawLabel(b: TownBuilding): void {
-    const { ctx } = this;
-    ctx.font = '600 11px "Segoe UI", system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = 'rgba(15, 30, 24, 0.55)';
-    ctx.fillStyle = '#f4efe4';
-    ctx.strokeText(b.name, 0, 58);
-    ctx.fillText(b.name, 0, 58);
-    ctx.font = '10px "Segoe UI", system-ui, sans-serif';
-    ctx.fillStyle = 'rgba(244, 239, 228, 0.85)';
-    ctx.strokeText(b.label, 0, 70);
-    ctx.fillText(b.label, 0, 70);
-  }
-
-  private drawBlock(
-    accent: string,
-    width: number,
-    height: number,
-    lit: boolean,
-    flag: boolean,
-  ): void {
-    const { ctx } = this;
-    const left = shade(accent, -0.18);
-    const right = shade(accent, -0.05);
-    const top = shade(accent, 0.12);
-    const hw = width / 2;
-
-    // Top
-    ctx.beginPath();
-    ctx.moveTo(0, -height);
-    ctx.lineTo(hw, -height + 12);
-    ctx.lineTo(0, -height + 24);
-    ctx.lineTo(-hw, -height + 12);
-    ctx.closePath();
-    ctx.fillStyle = top;
-    ctx.fill();
-
-    // Left
-    ctx.beginPath();
-    ctx.moveTo(-hw, -height + 12);
-    ctx.lineTo(0, -height + 24);
-    ctx.lineTo(0, 24);
-    ctx.lineTo(-hw, 12);
-    ctx.closePath();
-    ctx.fillStyle = left;
-    ctx.fill();
-
-    // Right
-    ctx.beginPath();
-    ctx.moveTo(hw, -height + 12);
-    ctx.lineTo(0, -height + 24);
-    ctx.lineTo(0, 24);
-    ctx.lineTo(hw, 12);
-    ctx.closePath();
-    ctx.fillStyle = right;
-    ctx.fill();
-
-    // Windows
-    const win = lit ? '#ffe7a0' : 'rgba(30, 50, 45, 0.55)';
-    ctx.fillStyle = win;
-    ctx.fillRect(-18, -8, 8, 10);
-    ctx.fillRect(-6, -8, 8, 10);
-    ctx.fillStyle = lit ? '#ffe7a0' : 'rgba(20, 35, 30, 0.45)';
-    ctx.fillRect(4, -4, 8, 10);
-
-    if (flag) this.drawFlag(18, -height - 4, accent);
-  }
-
-  private drawFlag(x: number, y: number, accent: string): void {
-    const { ctx } = this;
-    ctx.strokeStyle = '#2a2a2a';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(x, y + 22);
-    ctx.lineTo(x, y);
-    ctx.stroke();
-    ctx.fillStyle = accent;
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x + 14, y + 5);
-    ctx.lineTo(x, y + 10);
-    ctx.closePath();
-    ctx.fill();
-  }
-
-  private drawRoofPeak(accent: string, height: number, width: number): void {
-    const { ctx } = this;
-    const hw = width / 2;
-    ctx.beginPath();
-    ctx.moveTo(0, -height - 18);
-    ctx.lineTo(hw + 4, -height + 8);
-    ctx.lineTo(0, -height + 18);
-    ctx.lineTo(-hw - 4, -height + 8);
-    ctx.closePath();
-    ctx.fillStyle = shade(accent, -0.28);
-    ctx.fill();
-  }
-
-  private drawPlaza(b: TownBuilding, lit: boolean, flag: boolean): void {
-    const { ctx } = this;
-    ctx.fillStyle = shade(b.accent, 0.05);
-    ctx.beginPath();
-    ctx.ellipse(0, 8, 34, 16, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = shade(b.accent, -0.2);
-    ctx.lineWidth = 3;
-    ctx.stroke();
-
-    // Fountain
-    ctx.fillStyle = lit ? '#9fd6ff' : '#6fa0c4';
-    ctx.beginPath();
-    ctx.arc(0, 0, 10, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.35)';
-    ctx.beginPath();
-    ctx.arc(0, -14, 3, 0, Math.PI * 2);
-    ctx.fill();
-    if (flag) this.drawFlag(28, -20, b.accent);
-  }
-
-  private drawTownHall(b: TownBuilding, lit: boolean, flag: boolean): void {
-    this.drawBlock(b.accent, 52, 48, lit, false);
-    this.drawRoofPeak(b.accent, 48, 52);
-    // Clock
-    const { ctx } = this;
-    ctx.fillStyle = '#f4efe4';
-    ctx.beginPath();
-    ctx.arc(0, -28, 7, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#333';
+    ctx.strokeStyle = p.lit('#efe9da');
     ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(0, -28);
-    ctx.lineTo(0, -33);
-    ctx.moveTo(0, -28);
-    ctx.lineTo(4, -26);
-    ctx.stroke();
-    if (flag) this.drawFlag(0, -78, b.accent);
+    ctx.setLineDash([3, 4]);
+    for (const road of this.layout.roads) {
+      this.atTile(road.q, road.r, () => {
+        for (const link of road.links) {
+          const [du, dv] = ARM[link];
+          const [x, y] = p.at(du * 0.5, dv * 0.5);
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(x, y);
+          ctx.stroke();
+        }
+      });
+    }
+    ctx.setLineDash([]);
   }
 
-  private drawWorkshop(b: TownBuilding, lit: boolean, flag: boolean): void {
-    this.drawBlock(b.accent, 46, 34, lit, flag);
+  /** The plaza's paved square, and a concrete lot under every other building. */
+  private drawLots(p: Painter): void {
     const { ctx } = this;
-    // Chimney smoke cue
-    ctx.fillStyle = shade(b.accent, -0.3);
-    ctx.fillRect(12, -52, 8, 18);
-    if (lit) {
-      ctx.fillStyle = 'rgba(220,220,220,0.5)';
-      ctx.beginPath();
-      ctx.ellipse(16, -58, 6, 3, 0, 0, Math.PI * 2);
-      ctx.fill();
+    const plaza = this.plaza();
+    if (plaza) {
+      const paving = mixHex('#e8dfcc', plaza.accent, 0.18);
+      this.atTile(plaza.q, plaza.r, () => {
+        const [rx, ry] = p.groundRadii(PLAZA_RADIUS);
+        p.ellipse(0, 0, rx, ry, p.lit(paving));
+        ctx.strokeStyle = p.lit(paving, -0.1);
+        ctx.lineWidth = 1;
+        for (const r of [1, 0.65]) {
+          const [ex, ey] = p.groundRadii(r);
+          ctx.beginPath();
+          ctx.ellipse(0, 0, ex, ey, 0, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.strokeStyle = p.lit(paving, -0.2);
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      });
+    }
+    const k = 0.5;
+    for (const b of this.town.buildings) {
+      if (b === plaza) continue;
+      this.atTile(b.q, b.r, () =>
+        p.poly([p.at(k, -k), p.at(k, k), p.at(-k, k), p.at(-k, -k)], p.lit(this.isPlaceholder(b) ? '#b5b8ba' : '#ddd6c8')),
+      );
     }
   }
 
-  private drawPrintShop(b: TownBuilding, lit: boolean, flag: boolean): void {
-    this.drawBlock(b.accent, 44, 36, lit, flag);
-    const { ctx } = this;
-    ctx.fillStyle = '#f4efe4';
-    ctx.fillRect(-10, 2, 20, 6);
-    ctx.fillStyle = shade(b.accent, -0.35);
-    ctx.font = '7px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('PRESS', 0, 7);
+  private drawShadows(p: Painter): void {
+    const { dx, dy, alpha } = p.scene.shadow;
+    if (alpha <= 0) return;
+    const plaza = this.plaza();
+    for (const b of this.town.buildings) {
+      if (b === plaza) continue;
+      const d = this.design(b);
+      const [eu, ev] = d.extent.map((e) => e * BUILDING_SCALE);
+      this.atTile(b.q, b.r, () => p.castShadow(-eu, eu, -ev, ev, d.height * BUILDING_SCALE * 0.85));
+    }
+    for (const d of this.layout.decorations) {
+      if (d.kind !== 'tree' && d.kind !== 'pine') continue;
+      const [x, y] = this.center(d.q, d.r);
+      p.ellipse(x + dx * 12, y + dy * 12, 7, 3.5, `rgba(16, 28, 40, ${alpha * 0.8})`);
+    }
   }
 
-  private drawLab(b: TownBuilding, lit: boolean, flag: boolean): void {
-    this.drawBlock(b.accent, 42, 44, lit, flag);
+  /** After dark: pools of lamplight, and warm light spilling from busy buildings. */
+  private drawGlow(p: Painter): void {
+    const { night } = p.scene;
+    if (night < 0.05) return;
+    const pool = (x: number, y: number, radius: number, color: string, strength: number) => {
+      const g = this.ctx.createRadialGradient(x, y, 0, x, y, radius);
+      g.addColorStop(0, `rgba(${color}, ${strength * night})`);
+      g.addColorStop(1, `rgba(${color}, 0)`);
+      this.ctx.fillStyle = g;
+      this.ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+    };
+    for (const d of this.layout.decorations) {
+      if (d.kind !== 'lamp') continue;
+      const [x, y] = this.center(d.q, d.r);
+      pool(x, y, 30, '255, 214, 150', 0.32);
+    }
+    for (const b of this.town.buildings) {
+      if (this.isPlaceholder(b) || !this.cues[b.id]?.hasRecentCommits) continue;
+      const [x, y] = this.center(b.q + 0.42, b.r + 0.42);
+      pool(x, y, 38, '255, 200, 120', 0.24);
+    }
+  }
+
+  private drawHover(p: Painter): void {
+    const b = this.town.buildings.find((x) => x.id === this.hoverId);
+    if (!b) return;
+    const d = this.design(b);
+    const [x, y] = this.center(b.q, b.r);
+    const [rx, ry] = p.groundRadii(Math.max(d.extent[0], d.extent[1]) * BUILDING_SCALE + 0.2);
+    const pulse = 0.7 + 0.3 * Math.sin(p.now / 260);
     const { ctx } = this;
-    ctx.strokeStyle = shade(b.accent, 0.25);
+    ctx.beginPath();
+    ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255, 246, 214, ${0.16 * pulse})`;
+    ctx.fill();
+    ctx.strokeStyle = `rgba(255, 246, 214, ${0.85 * pulse})`;
     ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(-8, -50);
-    ctx.quadraticCurveTo(0, -70, 8, -50);
     ctx.stroke();
-    ctx.fillStyle = lit ? '#b8ffd8' : shade(b.accent, 0.2);
-    ctx.beginPath();
-    ctx.arc(0, -54, 4, 0, Math.PI * 2);
-    ctx.fill();
   }
 
-  private drawRealty(b: TownBuilding, lit: boolean, flag: boolean): void {
-    this.drawBlock(b.accent, 44, 38, lit, flag);
-    const { ctx } = this;
-    ctx.fillStyle = '#f4efe4';
-    ctx.beginPath();
-    ctx.moveTo(0, -8);
-    ctx.lineTo(10, 6);
-    ctx.lineTo(-10, 6);
-    ctx.closePath();
-    ctx.fill();
-  }
-
-  private drawDepot(b: TownBuilding, lit: boolean, flag: boolean): void {
-    this.drawBlock(b.accent, 50, 30, lit, flag);
-    const { ctx } = this;
-    ctx.fillStyle = shade(b.accent, -0.25);
-    ctx.fillRect(-22, -6, 16, 20);
-    ctx.fillStyle = lit ? '#ffe7a0' : 'rgba(0,0,0,0.25)';
-    ctx.fillRect(-18, 0, 8, 10);
-  }
-
-  private drawBank(b: TownBuilding, lit: boolean, flag: boolean): void {
-    this.drawBlock(b.accent, 48, 40, lit, flag);
-    const { ctx } = this;
-    ctx.fillStyle = shade(b.accent, 0.2);
-    for (const ox of [-14, -2, 10]) {
-      ctx.fillRect(ox, -18, 5, 28);
+  /** Buildings, trees and walkers, back to front. */
+  private drawObjects(p: Painter): void {
+    const items: Array<{ depth: number; draw: () => void }> = [];
+    const square = Boolean(this.plaza());
+    for (const b of this.town.buildings) items.push({ depth: b.q + b.r, draw: () => this.drawBuilding(p, b) });
+    for (const d of this.layout.decorations) {
+      if (d.kind === 'bench' && !square) continue;
+      items.push({ depth: d.q + d.r, draw: () => this.drawDecoration(p, d) });
     }
-    ctx.fillRect(-18, -22, 36, 5);
+    for (const w of this.walkers(p.now)) items.push({ depth: w.q + w.r, draw: () => this.drawWalker(p, w) });
+    items.sort((a, b) => a.depth - b.depth);
+    for (const item of items) item.draw();
   }
 
-  private drawConsulate(b: TownBuilding, lit: boolean, flag: boolean): void {
-    this.drawBlock(b.accent, 44, 42, lit, false);
-    this.drawRoofPeak(b.accent, 42, 44);
-    if (flag) this.drawFlag(-6, -72, b.accent);
-    this.drawFlag(6, -72, shade(b.accent, 0.25));
+  private drawBuilding(p: Painter, b: TownBuilding): void {
+    const placeholder = this.isPlaceholder(b);
+    const d = this.design(b);
+    const cue = this.cues[b.id];
+    this.atTile(b.q, b.r, () => {
+      this.ctx.scale(BUILDING_SCALE, BUILDING_SCALE);
+      d.paint(p, b.accent, !placeholder && Boolean(cue?.hasRecentCommits));
+      if (!placeholder && cue?.hasOpenPrs) p.flag(d.flag[0], d.flag[1], d.flag[2], d.pole, b.accent);
+    });
   }
 
-  private drawGym(b: TownBuilding, lit: boolean, flag: boolean): void {
-    this.drawBlock(b.accent, 48, 32, lit, flag);
+  private drawDecoration(p: Painter, d: Decoration): void {
     const { ctx } = this;
-    ctx.strokeStyle = '#f4efe4';
-    ctx.lineWidth = 3;
+    this.atTile(d.q, d.r, () => {
+      switch (d.kind) {
+        case 'tree': {
+          const green = ['#5f9e57', '#4e8f55', '#79aa58'][d.variant];
+          const s = 0.85 + (d.variant % 2) * 0.25;
+          ctx.fillStyle = p.lit('#7a5a3e');
+          ctx.fillRect(-1.2, -9 * s, 2.4, 9 * s);
+          p.ellipse(0, -14 * s, 8 * s, 7.5 * s, p.lit(green));
+          p.ellipse(-2.5 * s, -16.5 * s, 4 * s, 3.4 * s, p.lit(green, 0.12));
+          break;
+        }
+        case 'pine': {
+          const green = '#3f7a52';
+          ctx.fillStyle = p.lit('#6b4f37');
+          ctx.fillRect(-1, -5, 2, 5);
+          p.poly([[0, -27], [8.5, -5], [-8.5, -5]], p.lit(green));
+          p.poly([[0, -27], [8.5, -5], [0, -5]], p.lit(green, -0.14));
+          p.poly([[0, -33], [6.5, -15], [-6.5, -15]], p.lit(green, 0.04));
+          p.poly([[0, -33], [6.5, -15], [0, -15]], p.lit(green, -0.1));
+          break;
+        }
+        case 'bush': {
+          const green = d.variant === 2 ? '#6aa25a' : '#558f4f';
+          p.ellipse(-3, -3, 5, 4, p.lit(green));
+          p.ellipse(3, -2.5, 4.5, 3.6, p.lit(green, -0.08));
+          break;
+        }
+        case 'flowers': {
+          const colors = ['#f2a7c3', '#ffe08a', '#ffffff'];
+          for (let i = 0; i < 6; i++) {
+            ctx.fillStyle = p.lit(colors[(i + d.variant) % 3]);
+            ctx.fillRect(Math.cos(i * 2.1) * 5 - 1, Math.sin(i * 2.1) * 2.5 - 1, 2, 2);
+          }
+          break;
+        }
+        case 'lamp': {
+          const on = p.scene.night > 0.2;
+          ctx.fillStyle = p.lit('#3d4247');
+          ctx.fillRect(-0.7, -17, 1.4, 17);
+          if (on) p.ellipse(0, -18, 6, 6, `rgba(255, 227, 166, ${0.35 * p.scene.night})`);
+          p.ellipse(0, -18, 2.4, 1.8, on ? '#ffe3a6' : p.lit('#cfd3d6'));
+          break;
+        }
+        case 'bench': {
+          const wood = '#8a6a4e';
+          if (d.variant === 0) p.box({ u0: -0.12, u1: 0.12, v0: -0.04, v1: 0.04, z0: 2, z1: 4 }, wood);
+          else p.box({ u0: -0.04, u1: 0.04, v0: -0.12, v1: 0.12, z0: 2, z1: 4 }, wood);
+          break;
+        }
+      }
+    });
+  }
+
+  /**
+   * Bots with commits this week walk from their door to the plaza and back; the plaza's own bot
+   * strolls round the fountain.
+   */
+  private walkers(now: number): Walker[] {
+    const out: Walker[] = [];
+    const { hub, hasPlaza } = this.layout;
+    for (const b of this.town.buildings) {
+      if (this.isPlaceholder(b) || !this.cues[b.id]?.hasRecentCommits) continue;
+      const phase = tileNoise(b.q, b.r, 31);
+      const atHub = b.q === hub.q && b.r === hub.r;
+      if (atHub && !hasPlaza) continue;
+      const spot = atHub ? strollPosition(hub, now, phase) : walkerPosition(this.layout.paths[b.id] ?? [], now, phase, hasPlaza);
+      if (spot) out.push({ q: spot.q, r: spot.r, accent: b.accent, moving: spot.moving });
+    }
+    return out;
+  }
+
+  private drawWalker(p: Painter, w: Walker): void {
+    const { ctx } = this;
+    const [x, y] = this.center(w.q, w.r);
+    const swing = w.moving ? Math.sin(p.now / 140) : 0;
+    const bob = Math.abs(swing) * 1.1;
+    p.ellipse(x, y, 3, 1.4, 'rgba(10, 20, 15, 0.25)');
+    ctx.strokeStyle = p.lit('#3a3f46');
+    ctx.lineWidth = 1.2;
     ctx.beginPath();
-    ctx.arc(-8, -6, 8, 0, Math.PI * 2);
-    ctx.arc(8, -6, 8, 0, Math.PI * 2);
+    ctx.moveTo(x - 0.8, y - 4 - bob);
+    ctx.lineTo(x - 0.8 + swing * 0.9, y);
+    ctx.moveTo(x + 0.8, y - 4 - bob);
+    ctx.lineTo(x + 0.8 - swing * 0.9, y);
     ctx.stroke();
+    ctx.fillStyle = p.lit(w.accent);
+    ctx.beginPath();
+    ctx.roundRect(x - 2.2, y - 10.5 - bob, 4.4, 7, 1.6);
+    ctx.fill();
+    p.ellipse(x, y - 12.6 - bob, 2, 2, p.lit('#f0d2b4'));
+  }
+
+  /** Name tags on top of everything, so a tree or a taller building never hides them. */
+  private drawLabels(p: Painter): void {
+    const { ctx } = this;
+    this.labels.clear();
+    for (const b of this.town.buildings) {
+      if (!b.name) continue;
+      const [x, y] = this.center(b.q, b.r);
+      ctx.font = `600 11px ${FONT}`;
+      const nameWidth = ctx.measureText(b.name).width;
+      ctx.font = `10px ${FONT}`;
+      const subWidth = ctx.measureText(b.label).width;
+      const w = Math.max(nameWidth + 10, subWidth) + 18;
+      const left = x - w / 2;
+      const top = y + LABEL_TOP;
+      const hover = this.hoverId === b.id;
+
+      ctx.beginPath();
+      ctx.roundRect(left, top, w, LABEL_HEIGHT, 8);
+      ctx.fillStyle = hover ? 'rgba(10, 18, 15, 0.88)' : 'rgba(12, 22, 18, 0.7)';
+      ctx.fill();
+      ctx.strokeStyle = hover ? 'rgba(255, 246, 214, 0.8)' : 'rgba(255, 255, 255, 0.14)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      const start = x - (nameWidth + 10) / 2;
+      p.ellipse(start + 3, top + 9.5, 3, 3, this.isPlaceholder(b) ? PLACEHOLDER_ACCENT : b.accent);
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#ffffff';
+      ctx.font = `600 11px ${FONT}`;
+      ctx.fillText(b.name, start + 10, top + 13.5);
+      ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(232, 238, 234, 0.8)';
+      ctx.font = `10px ${FONT}`;
+      ctx.fillText(b.label, x, top + 24.5);
+      this.labels.set(b.id, { x: left, y: top, w, h: LABEL_HEIGHT });
+    }
   }
 }

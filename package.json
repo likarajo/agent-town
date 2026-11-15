@@ -4,7 +4,7 @@
   "private": true,
   "version": "0.2.0",
   "type": "module",
-  "description": "Isometric town command center for AI assistant bots",
+  "description": "3D town command center for AI assistant bots",
   "author": "likarajo",
   "main": "electron/main.cjs",
   "scripts": {
@@ -27,6 +27,7 @@
       "dist-desktop/**/*",
       "electron/**/*",
       "package.json",
+      "!node_modules/**/*",
       "!**/.env",
       "!**/.env.*"
     ],
@@ -58,10 +59,14 @@
     }
   },
   "devDependencies": {
+    "@types/three": "^0.187.0",
     "electron": "^45.3.2",
     "electron-builder": "^26.18.0",
     "typescript": "^5.8.2",
     "vite": "^6.2.2",
     "vitest": "^5.1.0"
+  },
+  "dependencies": {
+    "three": "^0.187.0"
   }
 }

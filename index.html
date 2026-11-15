@@ -46,13 +46,33 @@
         </div>
       </header>
 
-      <main class="stage" aria-label="Isometric town map">
+      <main class="stage" aria-label="Town map">
         <canvas id="town-canvas" aria-label="Agent Town map"></canvas>
         <div id="town-banner" class="banner" role="status" hidden>
           <span id="town-banner-text"></span>
           <button type="button" id="town-banner-settings">Settings</button>
         </div>
         <div id="town-tooltip" class="tooltip" role="tooltip" hidden></div>
+        <div id="map-controls" class="map-controls" hidden>
+          <button type="button" id="map-compass" class="map-btn compass" title="Face north" aria-label="Face north">
+            <span class="needle" aria-hidden="true"></span>
+          </button>
+          <button type="button" id="map-tilt" class="map-btn" title="Look straight down" aria-label="Look straight down">2D</button>
+          <div class="map-zoom">
+            <button type="button" id="map-zoom-in" class="map-btn" title="Zoom in" aria-label="Zoom in">+</button>
+            <button type="button" id="map-zoom-out" class="map-btn" title="Zoom out" aria-label="Zoom out">−</button>
+          </div>
+          <button type="button" id="map-walk" class="map-btn walk" title="Walk around the town" aria-pressed="false">Walk</button>
+        </div>
+        <div id="walk-hud" class="walk-hud" hidden>
+          <div class="crosshair" aria-hidden="true"></div>
+          <div id="walk-prompt" class="walk-prompt" role="status" hidden></div>
+          <div id="walk-help" class="walk-help"></div>
+        </div>
+        <div id="walk-touch" class="walk-touch" hidden>
+          <div id="walk-stick" class="walk-stick" aria-hidden="true"><div class="knob"></div></div>
+          <button type="button" id="walk-jump" class="walk-jump">Jump</button>
+        </div>
         <div class="hint" id="gesture-hint">Drag to pan · Pinch or scroll to zoom · Tap a building</div>
       </main>
 
