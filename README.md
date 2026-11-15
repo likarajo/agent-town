@@ -1,6 +1,6 @@
 # Agent Town
 
-A free, installable isometric town command center for a team of AI assistant bots, one building per bot.
+A free, installable 3D town command center for a team of AI assistant bots, one building per bot. Fly over it like a map, or walk its streets.
 
 Public visitors always see a labelled **sample** town: made-up bots from [`src/data/sample-roster.md`](src/data/sample-roster.md) with placeholder activity. Your own bots load only on your devices, from a roster file in your GitHub repo, after you save a fine-grained, read-only token.
 
@@ -18,7 +18,7 @@ npm run dev
 Open the URL Vite prints (assets are served under `/agent-town/`).
 
 ```bash
-npm test         # roster, URL and GitHub-loading tests
+npm test         # roster, layout, walking and GitHub-loading tests
 npm run build    # outputs dist/ for GitHub Pages
 npm run preview  # preview the production build
 ```
@@ -50,7 +50,42 @@ npm run preview  # preview the production build
    - **Second-brain repo**, as `owner/name`
    - **Roster URL**: the file's GitHub link (`https://github.com/you/second-brain/blob/main/roster.md`) or its path inside the second-brain repo
 
-The town redraws with your bots. Lit windows mean commits in the last 7 days; a flag means open pull requests.
+The town redraws with your bots.
+
+### Getting around
+
+The town opens in an **aerial view**, like a map app:
+
+| Do this | Mouse and keyboard | Touch |
+|---|---|---|
+| Pan | Drag, or the arrow keys | Drag with one finger |
+| Zoom | Scroll, `+` / `-`, or the zoom buttons | Pinch |
+| Turn and tilt | Right-drag or Ctrl-drag | Twist or drag with two fingers |
+| Open a building | Click it or its name tag | Tap it |
+
+The compass turns with the view; click it to face north. **2D / 3D** switches between looking straight down and the tilted view. The keys work once the map has focus (click it first).
+
+**Walk** drops you to street level where the map was looking, to walk around like in Minecraft:
+
+| Do this | Mouse and keyboard | Touch |
+|---|---|---|
+| Look around | Click the town to capture the mouse, then move it | Drag |
+| Move | `W` `A` `S` `D` or the arrow keys | The joystick, bottom left |
+| Jump, run | `Space`, hold `Shift` | **Jump** |
+| Open the building ahead | `E` or click (when its name shows under the crosshair) | Tap it |
+| Back to the air | `Esc` frees the mouse; `Esc` again, or **Aerial** | **Aerial** |
+
+Walls, trees and the island's edge stop you; you can't climb onto roofs.
+
+On devices that can't draw 3D (no WebGL), the town falls back to the flat 2D map automatically; add `?view=2d` to the address to see it anyway. The 3D code (three.js) is a separate download, fetched only when 3D is used.
+
+### Reading the town
+
+- **Warm, lit windows:** the bot has commits in the last 7 days. Those bots also walk between their building and the plaza.
+- **A flag on the roof:** the bot has open pull requests.
+- **Grey building:** something didn't load (see below).
+- **Sky:** follows your device's clock, from dawn to night, with the sun and moon crossing it; lamps and busy windows glow after dark. Add `?time=21:30` to the address to preview another hour.
+- Streets and trees come from the buildings' plots, so the same roster always gets the same town. Animation pauses when the tab is hidden; if your system asks for reduced motion, everything holds still and the camera jumps instead of gliding.
 
 - **Buildings stay put.** A bot's building comes only from its own row: the Building value picks a fixed look, colour and plot from [`src/town/catalog.ts`](src/town/catalog.ts), so the same row always gets the same building, on every device. Reordering, adding or removing other rows doesn't move it. If two rows pick the same building, the earlier row keeps its plot.
 - **Settings are a one-time step.** They stay saved on the device, across restarts, until you choose **Reset all settings** (or **Forget token**) in Settings.

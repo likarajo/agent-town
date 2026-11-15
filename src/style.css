@@ -166,6 +166,267 @@ button.danger {
   background: transparent;
 }
 
+.label-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.town-label {
+  display: grid;
+  grid-template-columns: auto auto;
+  justify-content: center;
+  align-items: center;
+  column-gap: 5px;
+  padding: 4px 9px 5px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(12, 22, 18, 0.72);
+  color: #ffffff;
+  font: inherit;
+  line-height: 1.15;
+  white-space: nowrap;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.town-label .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.town-label strong {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.town-label small {
+  grid-column: 1 / -1;
+  font-size: 10px;
+  color: rgba(232, 238, 234, 0.8);
+}
+
+.town-label:hover,
+.town-label.hover,
+.town-label:focus-visible {
+  background: rgba(10, 18, 15, 0.9);
+  border-color: rgba(255, 246, 214, 0.8);
+}
+
+.map-controls {
+  position: absolute;
+  right: calc(12px + var(--safe-right));
+  bottom: calc(58px + var(--safe-bottom));
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.map-controls[hidden],
+.map-controls [hidden] {
+  display: none;
+}
+
+.map-btn {
+  display: grid;
+  place-items: center;
+  min-width: 40px;
+  height: 40px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(15, 36, 28, 0.82);
+  color: var(--ink);
+  font-size: 0.85rem;
+  font-weight: 600;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(6px);
+}
+
+.map-btn:hover,
+.map-btn:focus-visible {
+  border-color: rgba(243, 239, 230, 0.45);
+  background: rgba(20, 48, 37, 0.92);
+}
+
+.map-zoom {
+  display: grid;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+}
+
+.map-zoom .map-btn {
+  border-radius: 0;
+  box-shadow: none;
+  font-size: 1.15rem;
+}
+
+.map-zoom .map-btn + .map-btn {
+  border-top: none;
+}
+
+.compass {
+  width: 40px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+/* A two-tone needle: the warm half points north. It turns with the view. */
+.compass .needle {
+  position: relative;
+  width: 8px;
+  height: 26px;
+}
+
+.compass .needle::before,
+.compass .needle::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+}
+
+.compass .needle::before {
+  top: 0;
+  border-bottom: 13px solid #e0735e;
+}
+
+.compass .needle::after {
+  bottom: 0;
+  border-top: 13px solid #e9e4d6;
+}
+
+.map-btn.walk[aria-pressed='true'] {
+  background: var(--live);
+  border-color: transparent;
+}
+
+.walk-hud {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.walk-hud[hidden],
+.walk-touch[hidden] {
+  display: none;
+}
+
+.crosshair {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  transform: translate(-50%, -50%);
+}
+
+.crosshair::before,
+.crosshair::after {
+  content: '';
+  position: absolute;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+.crosshair::before {
+  left: 8px;
+  top: 0;
+  width: 2px;
+  height: 18px;
+}
+
+.crosshair::after {
+  top: 8px;
+  left: 0;
+  width: 18px;
+  height: 2px;
+}
+
+.walk-prompt {
+  position: absolute;
+  left: 50%;
+  top: calc(50% + 22px);
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(12, 22, 18, 0.82);
+  border: 1px solid rgba(255, 246, 214, 0.5);
+  color: #ffffff;
+  font-size: 0.82rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.walk-help {
+  position: absolute;
+  left: 50%;
+  bottom: calc(14px + var(--safe-bottom));
+  transform: translateX(-50%);
+  max-width: calc(100% - 24px);
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(15, 36, 28, 0.78);
+  border: 1px solid var(--line);
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.walk-touch {
+  position: absolute;
+  inset: auto 0 0 0;
+  z-index: 3;
+  height: 0;
+}
+
+.walk-stick {
+  position: absolute;
+  left: calc(22px + var(--safe-left));
+  bottom: calc(56px + var(--safe-bottom));
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: rgba(15, 36, 28, 0.45);
+  border: 1px solid rgba(243, 239, 230, 0.35);
+  touch-action: none;
+}
+
+.walk-stick .knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 52px;
+  height: 52px;
+  margin: -26px 0 0 -26px;
+  border-radius: 50%;
+  background: rgba(243, 239, 230, 0.75);
+  pointer-events: none;
+}
+
+.walk-jump {
+  position: absolute;
+  right: calc(76px + var(--safe-right));
+  bottom: calc(70px + var(--safe-bottom));
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: rgba(15, 36, 28, 0.6);
+  border: 1px solid rgba(243, 239, 230, 0.4);
+  color: var(--ink);
+  font-weight: 600;
+  touch-action: none;
+}
+
 .hint {
   position: absolute;
   left: 50%;

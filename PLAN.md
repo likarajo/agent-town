@@ -2,20 +2,23 @@
 
 ## Goals
 
-Build a free, installable **command center** for a personal team of AI assistant bots, rendered as a small **2D isometric town** instead of a flat dashboard.
+Build a free, installable **command center** for a personal team of AI assistant bots, rendered as a small **3D town** (with a flat 2D isometric fallback) instead of a flat dashboard.
 
 - **Zero cost**: static site only (no backend), hosted on GitHub Pages; unsigned desktop builds from GitHub Actions.
 - **Installable**: PWA on laptop browsers and iPhone (Safari Add to Home Screen), plus an Electron desktop app for Windows and macOS.
 - **Privacy-first**: the repo and public Pages site show **sample bots and sample activity only**. The owner's roster and GitHub activity load only after a fine-grained, read-only token is saved locally (Settings on the web, `.env` on desktop).
-- **Light runtime**: plain HTML, CSS, and TypeScript (Vite). Canvas isometric renderer. No heavy 3D engine.
-- **Touch + mouse**: tap, pan, pinch-zoom, wheel zoom.
+- **Light runtime**: plain HTML, CSS, and TypeScript (Vite). three.js is the only runtime dependency, loaded as a separate chunk only when the 3D view is used; the 2D canvas renderer needs nothing.
+- **Touch + mouse**: tap, pan, pinch-zoom, wheel zoom, rotate and tilt; first-person walking with keyboard and mouse or an on-screen joystick.
 
 ## Architecture
 
 ```
 Browser (PWA) or Electron window
 ├── Shell: index.html + CSS + service worker (offline shell only; skipped on desktop)
-├── Town layer: canvas isometric map + camera (pan/zoom)
+├── Town layer: town/view.ts picks the 3D town (town/three/, three.js) or the 2D canvas map
+│   ├── shared: layout.ts (streets, trees, walk routes), scene.ts (time of day), buildings.ts (designs)
+│   ├── 3D: aerial map controls, first-person walk mode, CSS2D name tags, raycast picking
+│   └── 2D: isometric canvas renderer + camera (pan/zoom), used without WebGL or with ?view=2d
 ├── UI layer: building sheet, settings panel, status banner
 ├── Data layer:
 │   ├── town/catalog.ts — constants: ground, architectures (label, accent, home plot), spare plots, placeholder grey
@@ -34,14 +37,16 @@ Browser (PWA) or Electron window
 
 ### Rendering
 
-- Single `<canvas>` isometric projector (`tileToScreen`).
-- Procedural building glyphs drawn with 2D canvas paths (original art); unknown building types get a plain block, and anything that failed to load gets the grey placeholder block.
-- Activity cues: lit windows for commits in the last 7 days, a flag for open PRs.
+- 3D (default): three.js scene on a floating island; low-poly models built from the same design boxes as the 2D map (`SHAPES` in `buildings.ts`), with windows on every side. Sky dome, sun or moon as a shadow-casting light, fog, instanced trees and lamps. One tile is 10 m.
+- 2D fallback: a single `<canvas>` isometric projector (`tileToScreen`) drawing the same designs.
+- Both: unknown building types get a plain office, anything that failed to load gets the grey placeholder block, and the time of day follows the device clock (`?time=` pins it).
+- Activity cues: lit windows for commits in the last 7 days (those bots also walk to the plaza), a flag for open PRs.
 
 ### Interaction
 
-- Pointer events unified for mouse and touch.
-- One-finger / left-drag pan; pinch or wheel zoom; tap opens a bottom sheet for that building.
+- Aerial view (3D): map-style pan, zoom toward the pointer, rotate and tilt; compass, 2D/3D tilt toggle, zoom buttons; arrow keys and +/- once the map has focus. Tapping a building or its name tag opens its sheet and glides the camera to it.
+- Walk mode (3D): first-person, pointer lock, WASD, jump, run, collisions with walls, trees and the island edge (`three/collide.ts`), E to open the building ahead; joystick and drag-to-look on touch screens.
+- 2D map: one-finger / left-drag pan; pinch or wheel zoom; tap opens the sheet.
 
 ## Data model
 

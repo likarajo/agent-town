@@ -10,14 +10,14 @@ import {
   sampleTown,
   type TownLoad,
 } from './roster/load';
-import { clampScale, createCamera } from './town/camera';
-import { attachTownInput } from './town/input';
-import { TownRenderer } from './town/renderer';
-import type { ActivityCue, CameraState, TownBuilding } from './town/types';
+import { timeOverride } from './town/scene';
+import type { ActivityCue, TownBuilding } from './town/types';
+import { createTownView, type TownView } from './town/view';
 import { wireSettings } from './ui/settings';
 import { closeSheet, openPlaceholderSheet, openRosterSheet, openSheet } from './ui/sheet';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#town-canvas')!;
+const stage = canvas.parentElement!;
 const sheet = document.querySelector<HTMLElement>('#sheet')!;
 const sheetBody = document.querySelector<HTMLElement>('#sheet-body')!;
 const badge = document.querySelector<HTMLElement>('#data-mode-badge')!;
@@ -32,14 +32,13 @@ const hint = document.querySelector<HTMLElement>('#gesture-hint')!;
 
 // With a token, start from grey placeholders so sample bots never stand in for real ones.
 const initialLoad: TownLoad = { mode: 'sample', town: hasToken() ? loadingTown() : sampleTown() };
-const renderer = new TownRenderer(canvas, initialLoad.town);
+/** The 3D town, or the 2D map on devices that can't draw it; null until it has loaded. */
+let view: TownView | null = null;
 /** What the town shows right now; null while the owner's roster loads. */
 let current: TownLoad | null = hasToken() ? null : initialLoad;
 let source: TownDataSource = createDataSource(initialLoad);
 let cues: Record<string, ActivityCue> = {};
-let camera: CameraState = createCamera(1, 1);
 let raf = 0;
-let didCenterCamera = false;
 let selectionId = 0;
 let loadId = 0;
 
@@ -84,41 +83,43 @@ function showTooltip(building: TownBuilding | null, clientX: number, clientY: nu
   if (!reason) return;
   tooltip.textContent = reason;
   tooltip.classList.toggle('error', reason !== LOADING_REASON);
-  const stage = canvas.parentElement!.getBoundingClientRect();
-  const left = Math.min(clientX - stage.left + 14, stage.width - tooltip.offsetWidth - 8);
-  const top = Math.min(clientY - stage.top + 16, stage.height - tooltip.offsetHeight - 8);
+  const box = stage.getBoundingClientRect();
+  const left = Math.min(clientX - box.left + 14, box.width - tooltip.offsetWidth - 8);
+  const top = Math.min(clientY - box.top + 16, box.height - tooltip.offsetHeight - 8);
   tooltip.style.left = `${Math.max(8, left)}px`;
   tooltip.style.top = `${Math.max(8, top)}px`;
 }
 
-function scheduleDraw(): void {
-  cancelAnimationFrame(raf);
-  raf = requestAnimationFrame(() => renderer.draw(camera));
-}
+/**
+ * Ambient animation (water, walkers, clouds) runs at up to 30 fps. Input redraws on the next
+ * frame, and while the view is busy (walking, flying) every frame is drawn.
+ */
+const FRAME_MS = 1000 / 30;
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+let dirty = true;
+let lastFrame = 0;
 
-/** Center the town and zoom out just enough that every building and label fits. */
-function centerOnTown(width: number, height: number): void {
-  const box = renderer.buildingBounds();
-  const pad = 16;
-  const fit = Math.min((width - pad * 2) / (box.maxX - box.minX), (height - pad * 2) / (box.maxY - box.minY));
-  camera = createCamera(width, height);
-  camera.scale = clampScale(Math.min(width < 700 ? 0.9 : 1.15, fit));
-  camera.x = width / 2 - ((box.minX + box.maxX) / 2) * camera.scale;
-  camera.y = height / 2 - ((box.minY + box.maxY) / 2) * camera.scale;
-}
-
-function recenter(): void {
-  const stage = canvas.parentElement!;
-  if (stage.clientWidth > 1 && stage.clientHeight > 1) {
-    centerOnTown(stage.clientWidth, stage.clientHeight);
-    didCenterCamera = true;
+function frame(now: number): void {
+  raf = 0;
+  if (!view) return;
+  const still = reducedMotion.matches;
+  const busy = view.busy();
+  const animate = !document.hidden && (busy || !still);
+  if (dirty || (animate && (busy || now - lastFrame >= FRAME_MS))) {
+    dirty = false;
+    lastFrame = now;
+    view.render(still ? 0 : now);
   }
+  if (animate) raf = requestAnimationFrame(frame);
+}
+
+function scheduleDraw(): void {
+  dirty = true;
+  if (!raf) raf = requestAnimationFrame(frame);
 }
 
 function resize(): void {
-  const stage = canvas.parentElement!;
-  renderer.resize(stage.clientWidth, stage.clientHeight);
-  if (!didCenterCamera) recenter();
+  view?.resize(stage.clientWidth, stage.clientHeight);
   scheduleDraw();
 }
 
@@ -138,10 +139,10 @@ async function loadAndRender(): Promise<string> {
   if (hasToken()) {
     current = null;
     cues = {};
-    renderer.setTown(loadingTown());
+    view?.setTown(loadingTown());
     updateBadge(null);
     showBanner(LOADING_REASON);
-    recenter();
+    view?.recenter();
     scheduleDraw();
   }
 
@@ -151,8 +152,8 @@ async function loadAndRender(): Promise<string> {
   current = load;
   source = createDataSource(load);
   cues = {};
-  renderer.setTown(load.town);
-  recenter();
+  view?.setTown(load.town);
+  view?.recenter();
   updateBadge(load);
   showBanner(
     load.mode === 'error' ? "Couldn't load your roster. Hover or tap a grey building to see why." : undefined,
@@ -164,7 +165,7 @@ async function loadAndRender(): Promise<string> {
     void loadAllCues(source, load.town.buildings).then((loaded) => {
       if (id !== loadId) return;
       cues = loaded;
-      renderer.setCues(loaded);
+      view?.setCues(loaded);
       scheduleDraw();
     });
   }
@@ -210,15 +211,6 @@ function showRoster(): void {
   }
 }
 
-attachTownInput({
-  canvas,
-  getCamera: () => camera,
-  renderer,
-  onCameraChange: scheduleDraw,
-  onHover: showTooltip,
-  onSelect: (building) => void showBuilding(building),
-});
-
 sheetClose.addEventListener('click', () => {
   selectionId++;
   closeSheet(sheet);
@@ -239,10 +231,42 @@ sheetBody.addEventListener('click', (event) => {
   }
   const id = target.closest<HTMLElement>('[data-building]')?.dataset.building;
   const building = current?.town.buildings.find((b) => b.id === id);
-  if (building) void showBuilding(building);
+  if (!building) return;
+  view?.focus(building);
+  scheduleDraw();
+  void showBuilding(building);
+});
+// Hovering a bot in the roster panel highlights its building.
+sheetBody.addEventListener('pointerover', (event) => {
+  const row = (event.target as HTMLElement).closest<HTMLElement>('[data-building]');
+  view?.setHover(row?.dataset.building ?? null);
+  scheduleDraw();
+});
+sheetBody.addEventListener('pointerleave', () => {
+  view?.setHover(null);
+  scheduleDraw();
 });
 
 window.addEventListener('resize', resize);
-resize();
-void loadAndRender();
+document.addEventListener('visibilitychange', scheduleDraw);
+reducedMotion.addEventListener('change', scheduleDraw);
+// The sky follows the clock even when nothing else moves.
+window.setInterval(scheduleDraw, 60_000);
+
+async function start(): Promise<void> {
+  view = await createTownView({
+    canvas,
+    stage,
+    town: initialLoad.town,
+    onChange: scheduleDraw,
+    onSelect: (building) => void showBuilding(building),
+    onHover: showTooltip,
+    reducedMotion: () => reducedMotion.matches,
+  });
+  view.setClock(timeOverride(window.location.search));
+  resize();
+  await loadAndRender();
+}
+
+void start();
 void registerPwa();
